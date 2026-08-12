@@ -5,3 +5,10 @@ ml/datasets/raw/
 ml/datasets/processed/
 
 ml/models/
+
+ml/models/
+*.pkl
+*.joblib
+*.npy
+
+.env
