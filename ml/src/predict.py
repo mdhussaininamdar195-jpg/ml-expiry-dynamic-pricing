@@ -1,29 +1,32 @@
 import pandas as pd
 import joblib
+from pathlib import Path
 
+# Project root directory
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+MODEL_DIR = BASE_DIR / "ml" / "models"
 
 # ============================================================
 # 1. LOAD SAVED MODELS
 # ============================================================
-
 waste_model = joblib.load(
-    "ml/models/waste_risk_xgb.pkl"
+    MODEL_DIR / "waste_risk_xgb.pkl"
 )
-
 waste_preprocessor = joblib.load(
-    "ml/models/waste_preprocessor.pkl"
+    MODEL_DIR / "waste_preprocessor.pkl"
 )
 
 waste_label_encoder = joblib.load(
-    "ml/models/waste_risk_label_encoder.pkl"
+    MODEL_DIR / "waste_risk_label_encoder.pkl"
 )
 
 discount_model = joblib.load(
-    "ml/models/discount_model.pkl"
+    MODEL_DIR / "discount_model.pkl"
 )
 
 discount_preprocessor = joblib.load(
-    "ml/models/discount_preprocessor.pkl"
+    MODEL_DIR / "discount_preprocessor.pkl"
 )
 
 
@@ -195,75 +198,11 @@ def predict_price(product):
     # ========================================================
 
     return {
-        "product_name": product["Product_Name"],
-        "category": product["Category"],
-        "current_price": current_price,
-        "waste_risk_category": predicted_class,
-        "waste_risk_score": waste_risk_score,
-        "recommended_discount": recommended_discount,
-        "final_price": final_price
-    }
-
-
-# ============================================================
-# 3. TEST ONE PRODUCT
-# ============================================================
-
-product = {
-    "Product_Name": "Yogurt Cup",
-    "Category": "Dairy",
-    "Stock_Date": "2026-08-10",
-    "Expiry_Date": "2026-08-13",
-    "Current_Stock": 50,
-    "Historical_Sales": 20,
-    "Selling_Price": 200.0,
-    "Demand_Rate": 5.0,
-    "Sales_Velocity": 4,
-    "Days_Left": 3,
-    "Expected_Demand": 15
+    "product_name": product["Product_Name"],
+    "category": product["Category"],
+    "current_price": float(current_price),
+    "waste_risk_category": predicted_class,
+    "waste_risk_score": float(waste_risk_score),
+    "recommended_discount": float(recommended_discount),
+    "final_price": float(final_price)
 }
-
-
-result = predict_price(product)
-
-
-print("\n======================================")
-print("       DYNAMIC PRICING RESULT")
-print("======================================")
-
-print(
-    f"Product             : "
-    f"{result['product_name']}"
-)
-
-print(
-    f"Category            : "
-    f"{result['category']}"
-)
-
-print(
-    f"Current Price       : "
-    f"₹{result['current_price']:.2f}"
-)
-
-print(
-    f"Waste Risk Category : "
-    f"{result['waste_risk_category']}"
-)
-
-print(
-    f"Waste Risk Score    : "
-    f"{result['waste_risk_score']:.2f}%"
-)
-
-print(
-    f"Recommended Discount: "
-    f"{result['recommended_discount']:.2f}%"
-)
-
-print(
-    f"Final Selling Price : "
-    f"₹{result['final_price']:.2f}"
-)
-
-print("======================================")
