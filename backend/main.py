@@ -217,9 +217,10 @@ def get_product(product_id: int):
     connection.close()
 
     if product is None:
-        return {
-            "message": "Product not found"
-        }
+        raise HTTPException(
+        status_code=404,
+        detail="Product not found"
+    )
 
     return dict(product)
 # ============================================================
@@ -275,5 +276,35 @@ def update_product(product_id: int, product: Product):
 
     return {
         "message": "Product updated successfully",
+        "product_id": product_id
+    }
+# ============================================================
+# DELETE PRODUCT
+# ============================================================
+
+@app.delete("/products/{product_id}")
+def delete_product(product_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "DELETE FROM products WHERE id = ?",
+        (product_id,)
+    )
+
+    connection.commit()
+
+    if cursor.rowcount == 0:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    connection.close()
+
+    return {
+        "message": "Product deleted successfully",
         "product_id": product_id
     }
