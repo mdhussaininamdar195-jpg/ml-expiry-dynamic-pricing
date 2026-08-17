@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import sys
 from pathlib import Path
+import json
 
 from backend.database import create_table, get_connection
 
@@ -112,7 +113,7 @@ def predict_product(product: Product):
             SET prediction = ?
             WHERE id = ?
         """, (
-            str(result),
+            json.dumps(result),
             product.product_id
         ))
 
