@@ -124,11 +124,48 @@ def predict_product(product: Product):
 
 
 # ============================================================
-# CREATE PRODUCT
+# CREATE PRODUCT + AUTOMATIC ML PREDICTION
 # ============================================================
 
 @app.post("/products")
 def create_product(product: Product):
+
+    # --------------------------------------------------------
+    # 1. Prepare product data for ML model
+    # --------------------------------------------------------
+
+    product_data = {
+
+        "Product_Name": product.product_name,
+        "Category": product.category,
+
+        "Stock_Date": product.stock_date,
+        "Expiry_Date": product.expiry_date,
+
+        "Current_Stock": product.current_stock,
+        "Historical_Sales": product.historical_sales,
+
+        "Selling_Price": product.selling_price,
+
+        "Demand_Rate": product.demand_rate,
+        "Sales_Velocity": product.sales_velocity,
+
+        "Days_Left": product.days_left,
+        "Expected_Demand": product.expected_demand
+    }
+
+    # --------------------------------------------------------
+    # 2. Run ML prediction automatically
+    # --------------------------------------------------------
+
+    prediction = predict_price(product_data)
+
+    # Convert prediction dictionary to JSON
+    prediction_json = json.dumps(prediction)
+
+    # --------------------------------------------------------
+    # 3. Save product + prediction to database
+    # --------------------------------------------------------
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -145,9 +182,10 @@ def create_product(product: Product):
             demand_rate,
             sales_velocity,
             days_left,
-            expected_demand
+            expected_demand,
+            prediction
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         product.product_name,
         product.category,
@@ -159,7 +197,8 @@ def create_product(product: Product):
         product.demand_rate,
         product.sales_velocity,
         product.days_left,
-        product.expected_demand
+        product.expected_demand,
+        prediction_json
     ))
 
     connection.commit()
@@ -168,15 +207,16 @@ def create_product(product: Product):
 
     connection.close()
 
+    # --------------------------------------------------------
+    # 4. Return product + ML prediction
+    # --------------------------------------------------------
+
     return {
         "message": "Product added successfully",
-        "product_id": product_id
+        "product_id": product_id,
+        "prediction": prediction
     }
 
-
-# ============================================================
-# GET ALL PRODUCTS
-# ============================================================
 
 # ============================================================
 # GET ALL PRODUCTS
@@ -194,7 +234,81 @@ def get_products():
 
     connection.close()
 
-    return [dict(product) for product in products]
+    result = []
+
+    for product in products:
+
+        product_data = dict(product)
+
+        if product_data["prediction"]:
+
+            product_data["prediction"] = json.loads(
+                product_data["prediction"]
+            )
+
+        result.append(product_data)
+
+    return result
+
+
+# ============================================================
+# SEARCH PRODUCTS
+# IMPORTANT: THIS MUST COME BEFORE /products/{product_id}
+# ============================================================
+
+@app.get("/products/search")
+def search_products(
+    product_name: str | None = None,
+    category: str | None = None
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    query = "SELECT * FROM products WHERE 1=1"
+
+    parameters = []
+
+    if product_name:
+
+        query += " AND product_name LIKE ?"
+
+        parameters.append(
+            f"%{product_name}%"
+        )
+
+    if category:
+
+        query += " AND category LIKE ?"
+
+        parameters.append(
+            f"%{category}%"
+        )
+
+    cursor.execute(
+        query,
+        parameters
+    )
+
+    products = cursor.fetchall()
+
+    connection.close()
+
+    result = []
+
+    for product in products:
+
+        product_data = dict(product)
+
+        if product_data["prediction"]:
+
+            product_data["prediction"] = json.loads(
+                product_data["prediction"]
+            )
+
+        result.append(product_data)
+
+    return result
 
 
 # ============================================================
@@ -217,18 +331,32 @@ def get_product(product_id: int):
     connection.close()
 
     if product is None:
-        raise HTTPException(
-        status_code=404,
-        detail="Product not found"
-    )
 
-    return dict(product)
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    product_data = dict(product)
+
+    if product_data["prediction"]:
+
+        product_data["prediction"] = json.loads(
+            product_data["prediction"]
+        )
+
+    return product_data
+
+
 # ============================================================
 # UPDATE PRODUCT
 # ============================================================
 
 @app.put("/products/{product_id}")
-def update_product(product_id: int, product: Product):
+def update_product(
+    product_id: int,
+    product: Product
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -266,7 +394,9 @@ def update_product(product_id: int, product: Product):
     connection.commit()
 
     if cursor.rowcount == 0:
+
         connection.close()
+
         raise HTTPException(
             status_code=404,
             detail="Product not found"
@@ -278,6 +408,8 @@ def update_product(product_id: int, product: Product):
         "message": "Product updated successfully",
         "product_id": product_id
     }
+
+
 # ============================================================
 # DELETE PRODUCT
 # ============================================================
@@ -296,7 +428,9 @@ def delete_product(product_id: int):
     connection.commit()
 
     if cursor.rowcount == 0:
+
         connection.close()
+
         raise HTTPException(
             status_code=404,
             detail="Product not found"
@@ -308,6 +442,8 @@ def delete_product(product_id: int):
         "message": "Product deleted successfully",
         "product_id": product_id
     }
+
+
 # ============================================================
 # DATABASE HEALTH CHECK
 # ============================================================
@@ -318,7 +454,9 @@ def database_status():
     connection = get_connection()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM products")
+    cursor.execute(
+        "SELECT COUNT(*) FROM products"
+    )
 
     product_count = cursor.fetchone()[0]
 
