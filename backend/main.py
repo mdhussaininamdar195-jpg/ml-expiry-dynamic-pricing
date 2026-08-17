@@ -308,3 +308,24 @@ def delete_product(product_id: int):
         "message": "Product deleted successfully",
         "product_id": product_id
     }
+# ============================================================
+# DATABASE HEALTH CHECK
+# ============================================================
+
+@app.get("/database/status")
+def database_status():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM products")
+
+    product_count = cursor.fetchone()[0]
+
+    connection.close()
+
+    return {
+        "database": "SQLite",
+        "status": "connected",
+        "product_count": product_count
+    }
