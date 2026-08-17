@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import sys
 from pathlib import Path
 
+from backend.database import create_table, get_connection
+
 
 # ============================================================
 # ADD PROJECT ROOT TO PYTHON PATH
@@ -27,6 +29,7 @@ from predict import predict_price
 # ============================================================
 
 app = FastAPI()
+create_table()
 
 
 # ============================================================
@@ -97,3 +100,63 @@ def predict_product(product: Product):
 
 
     return result
+
+@app.post("/products")
+def create_product(product: Product):
+    
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO products (
+            product_name,
+            category,
+            stock_date,
+            expiry_date,
+            current_stock,
+            historical_sales,
+            selling_price,
+            demand_rate,
+            sales_velocity,
+            days_left,
+            expected_demand
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        product.product_name,
+        product.category,
+        product.stock_date,
+        product.expiry_date,
+        product.current_stock,
+        product.historical_sales,
+        product.selling_price,
+        product.demand_rate,
+        product.sales_velocity,
+        product.days_left,
+        product.expected_demand
+    ))
+
+    connection.commit()
+
+    product_id = cursor.lastrowid
+
+    connection.close()
+
+    return {
+        "message": "Product added successfully",
+        "product_id": product_id
+    }
+@app.get("/products")
+def get_products():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT * FROM products")
+
+    products = cursor.fetchall()
+
+    connection.close()
+
+    return [dict(product) for product in products]
