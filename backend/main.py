@@ -29,6 +29,7 @@ from predict import predict_price
 # ============================================================
 
 app = FastAPI()
+
 create_table()
 
 
@@ -37,6 +38,8 @@ create_table()
 # ============================================================
 
 class Product(BaseModel):
+
+    product_id: int | None = None
 
     product_name: str
     category: str
@@ -95,15 +98,36 @@ def predict_product(product: Product):
         "Expected_Demand": product.expected_demand
     }
 
-
+    # Run ML prediction
     result = predict_price(product_data)
 
+    # Save prediction to database
+    if product.product_id is not None:
+
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            UPDATE products
+            SET prediction = ?
+            WHERE id = ?
+        """, (
+            str(result),
+            product.product_id
+        ))
+
+        connection.commit()
+        connection.close()
 
     return result
 
+
+# ============================================================
+# CREATE PRODUCT
+# ============================================================
+
 @app.post("/products")
 def create_product(product: Product):
-    
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -147,6 +171,12 @@ def create_product(product: Product):
         "message": "Product added successfully",
         "product_id": product_id
     }
+
+
+# ============================================================
+# GET ALL PRODUCTS
+# ============================================================
+
 @app.get("/products")
 def get_products():
 
