@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sys
 from pathlib import Path
@@ -178,6 +178,10 @@ def create_product(product: Product):
 # GET ALL PRODUCTS
 # ============================================================
 
+# ============================================================
+# GET ALL PRODUCTS
+# ============================================================
+
 @app.get("/products")
 def get_products():
 
@@ -191,3 +195,85 @@ def get_products():
     connection.close()
 
     return [dict(product) for product in products]
+
+
+# ============================================================
+# GET PRODUCT BY ID
+# ============================================================
+
+@app.get("/products/{product_id}")
+def get_product(product_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "SELECT * FROM products WHERE id = ?",
+        (product_id,)
+    )
+
+    product = cursor.fetchone()
+
+    connection.close()
+
+    if product is None:
+        return {
+            "message": "Product not found"
+        }
+
+    return dict(product)
+# ============================================================
+# UPDATE PRODUCT
+# ============================================================
+
+@app.put("/products/{product_id}")
+def update_product(product_id: int, product: Product):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        UPDATE products
+        SET
+            product_name = ?,
+            category = ?,
+            stock_date = ?,
+            expiry_date = ?,
+            current_stock = ?,
+            historical_sales = ?,
+            selling_price = ?,
+            demand_rate = ?,
+            sales_velocity = ?,
+            days_left = ?,
+            expected_demand = ?
+        WHERE id = ?
+    """, (
+        product.product_name,
+        product.category,
+        product.stock_date,
+        product.expiry_date,
+        product.current_stock,
+        product.historical_sales,
+        product.selling_price,
+        product.demand_rate,
+        product.sales_velocity,
+        product.days_left,
+        product.expected_demand,
+        product_id
+    ))
+
+    connection.commit()
+
+    if cursor.rowcount == 0:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    connection.close()
+
+    return {
+        "message": "Product updated successfully",
+        "product_id": product_id
+    }
