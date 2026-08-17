@@ -130,12 +130,11 @@ def predict_product(product: Product):
 @app.post("/products")
 def create_product(product: Product):
 
-    # --------------------------------------------------------
+    # ============================================================
     # 1. Prepare product data for ML model
-    # --------------------------------------------------------
+    # ============================================================
 
     product_data = {
-
         "Product_Name": product.product_name,
         "Category": product.category,
 
@@ -154,18 +153,18 @@ def create_product(product: Product):
         "Expected_Demand": product.expected_demand
     }
 
-    # --------------------------------------------------------
+    # ============================================================
     # 2. Run ML prediction automatically
-    # --------------------------------------------------------
+    # ============================================================
 
     prediction = predict_price(product_data)
 
     # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
 
-    # --------------------------------------------------------
+    # ============================================================
     # 3. Save product + prediction to database
-    # --------------------------------------------------------
+    # ============================================================
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -185,7 +184,7 @@ def create_product(product: Product):
             expected_demand,
             prediction
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         product.product_name,
         product.category,
@@ -206,10 +205,6 @@ def create_product(product: Product):
     product_id = cursor.lastrowid
 
     connection.close()
-
-    # --------------------------------------------------------
-    # 4. Return product + ML prediction
-    # --------------------------------------------------------
 
     return {
         "message": "Product added successfully",
