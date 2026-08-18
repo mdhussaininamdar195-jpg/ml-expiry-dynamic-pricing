@@ -217,13 +217,23 @@ def create_product(product: Product):
 # GET ALL PRODUCTS
 # ============================================================
 
+# ============================================================
+# GET ALL PRODUCTS WITH PAGINATION
+# ============================================================
+
 @app.get("/products")
-def get_products():
+def get_products(
+    limit: int = 20,
+    offset: int = 0
+):
 
     connection = get_connection()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT * FROM products")
+    cursor.execute(
+        "SELECT * FROM products LIMIT ? OFFSET ?",
+        (limit, offset)
+    )
 
     products = cursor.fetchall()
 
@@ -251,39 +261,37 @@ def get_products():
 # IMPORTANT: THIS MUST COME BEFORE /products/{product_id}
 # ============================================================
 
+# ============================================================
+# SEARCH PRODUCTS
+# ============================================================
+
 @app.get("/products/search")
 def search_products(
     product_name: str | None = None,
-    category: str | None = None
+    category: str | None = None,
+    limit: int = 20,
+    offset: int = 0
 ):
 
     connection = get_connection()
     cursor = connection.cursor()
 
     query = "SELECT * FROM products WHERE 1=1"
-
     parameters = []
 
     if product_name:
-
         query += " AND product_name LIKE ?"
-
-        parameters.append(
-            f"%{product_name}%"
-        )
+        parameters.append(f"%{product_name}%")
 
     if category:
-
         query += " AND category LIKE ?"
+        parameters.append(f"%{category}%")
 
-        parameters.append(
-            f"%{category}%"
-        )
+    # Limit the number of results
+    query += " LIMIT ? OFFSET ?"
+    parameters.extend([limit, offset])
 
-    cursor.execute(
-        query,
-        parameters
-    )
+    cursor.execute(query, parameters)
 
     products = cursor.fetchall()
 
@@ -296,7 +304,6 @@ def search_products(
         product_data = dict(product)
 
         if product_data["prediction"]:
-
             product_data["prediction"] = json.loads(
                 product_data["prediction"]
             )
