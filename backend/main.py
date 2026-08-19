@@ -1,33 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import sys
-from pathlib import Path
 import json
-
 from backend.database import create_table, get_connection
+from ml.src.predict import predict_price
 
-
-# ============================================================
-# ADD PROJECT ROOT TO PYTHON PATH
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-sys.path.append(
-    str(BASE_DIR / "ml" / "src")
-)
-
-
-# ============================================================
-# IMPORT ML PREDICTION FUNCTION
-# ============================================================
-
-from predict import predict_price
-
-
-# ============================================================
-# CREATE FASTAPI APP
-# ============================================================
 
 app = FastAPI()
 
