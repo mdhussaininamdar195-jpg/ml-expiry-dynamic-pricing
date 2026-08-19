@@ -1,33 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import sys
-from pathlib import Path
 import json
-
 from backend.database import create_table, get_connection
+from ml.src.predict import predict_price
 
-
-# ============================================================
-# ADD PROJECT ROOT TO PYTHON PATH
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-sys.path.append(
-    str(BASE_DIR / "ml" / "src")
-)
-
-
-# ============================================================
-# IMPORT ML PREDICTION FUNCTION
-# ============================================================
-
-from predict import predict_price
-
-
-# ============================================================
-# CREATE FASTAPI APP
-# ============================================================
 
 app = FastAPI()
 
@@ -130,12 +106,11 @@ def predict_product(product: Product):
 @app.post("/products")
 def create_product(product: Product):
 
-    # --------------------------------------------------------
+    # ============================================================
     # 1. Prepare product data for ML model
-    # --------------------------------------------------------
+    # ============================================================
 
     product_data = {
-
         "Product_Name": product.product_name,
         "Category": product.category,
 
@@ -154,18 +129,18 @@ def create_product(product: Product):
         "Expected_Demand": product.expected_demand
     }
 
-    # --------------------------------------------------------
+    # ============================================================
     # 2. Run ML prediction automatically
-    # --------------------------------------------------------
+    # ============================================================
 
     prediction = predict_price(product_data)
 
     # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
 
-    # --------------------------------------------------------
+    # ============================================================
     # 3. Save product + prediction to database
-    # --------------------------------------------------------
+    # ============================================================
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -185,7 +160,7 @@ def create_product(product: Product):
             expected_demand,
             prediction
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         product.product_name,
         product.category,
@@ -207,10 +182,6 @@ def create_product(product: Product):
 
     connection.close()
 
-    # --------------------------------------------------------
-    # 4. Return product + ML prediction
-    # --------------------------------------------------------
-
     return {
         "message": "Product added successfully",
         "product_id": product_id,
@@ -222,13 +193,23 @@ def create_product(product: Product):
 # GET ALL PRODUCTS
 # ============================================================
 
+# ============================================================
+# GET ALL PRODUCTS WITH PAGINATION
+# ============================================================
+
 @app.get("/products")
-def get_products():
+def get_products(
+    limit: int = 20,
+    offset: int = 0
+):
 
     connection = get_connection()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT * FROM products")
+    cursor.execute(
+        "SELECT * FROM products LIMIT ? OFFSET ?",
+        (limit, offset)
+    )
 
     products = cursor.fetchall()
 
@@ -256,39 +237,37 @@ def get_products():
 # IMPORTANT: THIS MUST COME BEFORE /products/{product_id}
 # ============================================================
 
+# ============================================================
+# SEARCH PRODUCTS
+# ============================================================
+
 @app.get("/products/search")
 def search_products(
     product_name: str | None = None,
-    category: str | None = None
+    category: str | None = None,
+    limit: int = 20,
+    offset: int = 0
 ):
 
     connection = get_connection()
     cursor = connection.cursor()
 
     query = "SELECT * FROM products WHERE 1=1"
-
     parameters = []
 
     if product_name:
-
         query += " AND product_name LIKE ?"
-
-        parameters.append(
-            f"%{product_name}%"
-        )
+        parameters.append(f"%{product_name}%")
 
     if category:
-
         query += " AND category LIKE ?"
+        parameters.append(f"%{category}%")
 
-        parameters.append(
-            f"%{category}%"
-        )
+    # Limit the number of results
+    query += " LIMIT ? OFFSET ?"
+    parameters.extend([limit, offset])
 
-    cursor.execute(
-        query,
-        parameters
-    )
+    cursor.execute(query, parameters)
 
     products = cursor.fetchall()
 
@@ -301,7 +280,6 @@ def search_products(
         product_data = dict(product)
 
         if product_data["prediction"]:
-
             product_data["prediction"] = json.loads(
                 product_data["prediction"]
             )
