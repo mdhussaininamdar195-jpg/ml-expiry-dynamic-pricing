@@ -43,3 +43,19 @@ def create_table():
 
     connection.commit()
     connection.close()
+def create_users_table():
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE,
+            hashed_password TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+
+    connection.commit()
+    connection.close()

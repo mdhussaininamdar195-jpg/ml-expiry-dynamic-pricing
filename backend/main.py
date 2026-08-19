@@ -1,13 +1,29 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import json
-from backend.database import create_table, get_connection
+
+from fastapi.security import OAuth2PasswordRequestForm
+
+from backend.database import (
+    create_table,
+    create_users_table,
+    get_connection
+)
+
+from backend.auth import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    get_current_user
+)
+
 from ml.src.predict import predict_price
 
 
 app = FastAPI()
 
 create_table()
+create_users_table()
 
 
 # ============================================================
@@ -34,6 +50,12 @@ class Product(BaseModel):
 
     days_left: int
     expected_demand: int
+    
+class UserRegister(BaseModel):
+
+    username: str
+    email: str | None = None
+    password: str
 
 
 # ============================================================
@@ -51,6 +73,136 @@ def root():
 # ============================================================
 # PRODUCT + ML PREDICTION
 # ============================================================
+
+# ============================================================
+# USER REGISTRATION
+# ============================================================
+
+@app.post("/register")
+def register_user(user: UserRegister):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Check whether username already exists
+    cursor.execute(
+        "SELECT id FROM users WHERE username = ?",
+        (user.username,)
+    )
+
+    existing_user = cursor.fetchone()
+
+    if existing_user:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Username already registered"
+        )
+
+    # Hash password before storing it
+    hashed_password = get_password_hash(
+        user.password
+    )
+
+    cursor.execute("""
+        INSERT INTO users (
+            username,
+            email,
+            hashed_password
+        )
+        VALUES (?, ?, ?)
+    """, (
+        user.username,
+        user.email,
+        hashed_password
+    ))
+
+    connection.commit()
+
+    user_id = cursor.lastrowid
+
+    connection.close()
+
+    return {
+        "message": "User registered successfully",
+        "user_id": user_id,
+        "username": user.username
+    }
+
+# ============================================================
+# LOGIN + JWT TOKEN
+# ============================================================
+
+@app.post("/token")
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT id, username, hashed_password, is_active
+        FROM users
+        WHERE username = ?
+    """, (
+        form_data.username,
+    ))
+
+    user = cursor.fetchone()
+
+    connection.close()
+
+    if user is None:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password"
+        )
+
+    if not verify_password(
+        form_data.password,
+        user["hashed_password"]
+    ):
+
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password"
+        )
+
+    if not user["is_active"]:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Inactive user"
+        )
+
+    access_token = create_access_token(
+        data={
+            "sub": user["username"]
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
+# ============================================================
+# AUTH TEST ENDPOINT
+# ============================================================
+
+@app.get("/auth/me")
+def read_current_user(
+    current_user: dict = Depends(get_current_user)
+):
+
+    return {
+        "message": "Authentication successful",
+        "user": current_user
+    }
 
 @app.post("/predict")
 def predict_product(product: Product):
