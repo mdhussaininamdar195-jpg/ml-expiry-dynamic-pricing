@@ -20,6 +20,10 @@ from backend.auth import (
 from ml.src.predict import predict_price
 
 
+# ============================================================
+# CREATE FASTAPI APP
+# ============================================================
+
 app = FastAPI()
 
 create_table()
@@ -50,7 +54,12 @@ class Product(BaseModel):
 
     days_left: int
     expected_demand: int
-    
+
+
+# ============================================================
+# USER REGISTRATION MODEL
+# ============================================================
+
 class UserRegister(BaseModel):
 
     username: str
@@ -59,7 +68,7 @@ class UserRegister(BaseModel):
 
 
 # ============================================================
-# HOME ROUTE
+# HOME ROUTE - PUBLIC
 # ============================================================
 
 @app.get("/")
@@ -71,11 +80,7 @@ def root():
 
 
 # ============================================================
-# PRODUCT + ML PREDICTION
-# ============================================================
-
-# ============================================================
-# USER REGISTRATION
+# USER REGISTRATION - PUBLIC
 # ============================================================
 
 @app.post("/register")
@@ -131,8 +136,9 @@ def register_user(user: UserRegister):
         "username": user.username
     }
 
+
 # ============================================================
-# LOGIN + JWT TOKEN
+# LOGIN + JWT TOKEN - PUBLIC
 # ============================================================
 
 @app.post("/token")
@@ -190,8 +196,9 @@ def login(
         "token_type": "bearer"
     }
 
+
 # ============================================================
-# AUTH TEST ENDPOINT
+# CURRENT USER - PROTECTED
 # ============================================================
 
 @app.get("/auth/me")
@@ -204,8 +211,16 @@ def read_current_user(
         "user": current_user
     }
 
+
+# ============================================================
+# PRODUCT + ML PREDICTION - PROTECTED
+# ============================================================
+
 @app.post("/predict")
-def predict_product(product: Product):
+def predict_product(
+    product: Product,
+    current_user: dict = Depends(get_current_user)
+):
 
     product_data = {
 
@@ -252,17 +267,19 @@ def predict_product(product: Product):
 
 
 # ============================================================
-# CREATE PRODUCT + AUTOMATIC ML PREDICTION
+# CREATE PRODUCT + AUTOMATIC ML PREDICTION - PROTECTED
 # ============================================================
 
 @app.post("/products")
-def create_product(product: Product):
+def create_product(
+    product: Product,
+    current_user: dict = Depends(get_current_user)
+):
 
-    # ============================================================
     # 1. Prepare product data for ML model
-    # ============================================================
 
     product_data = {
+
         "Product_Name": product.product_name,
         "Category": product.category,
 
@@ -281,18 +298,14 @@ def create_product(product: Product):
         "Expected_Demand": product.expected_demand
     }
 
-    # ============================================================
     # 2. Run ML prediction automatically
-    # ============================================================
 
     prediction = predict_price(product_data)
 
     # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
 
-    # ============================================================
     # 3. Save product + prediction to database
-    # ============================================================
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -342,17 +355,14 @@ def create_product(product: Product):
 
 
 # ============================================================
-# GET ALL PRODUCTS
-# ============================================================
-
-# ============================================================
-# GET ALL PRODUCTS WITH PAGINATION
+# GET ALL PRODUCTS - PROTECTED
 # ============================================================
 
 @app.get("/products")
 def get_products(
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -385,12 +395,7 @@ def get_products(
 
 
 # ============================================================
-# SEARCH PRODUCTS
-# IMPORTANT: THIS MUST COME BEFORE /products/{product_id}
-# ============================================================
-
-# ============================================================
-# SEARCH PRODUCTS
+# SEARCH PRODUCTS - PROTECTED
 # ============================================================
 
 @app.get("/products/search")
@@ -398,7 +403,8 @@ def search_products(
     product_name: str | None = None,
     category: str | None = None,
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -408,18 +414,32 @@ def search_products(
     parameters = []
 
     if product_name:
+
         query += " AND product_name LIKE ?"
-        parameters.append(f"%{product_name}%")
+
+        parameters.append(
+            f"%{product_name}%"
+        )
 
     if category:
+
         query += " AND category LIKE ?"
-        parameters.append(f"%{category}%")
 
-    # Limit the number of results
+        parameters.append(
+            f"%{category}%"
+        )
+
     query += " LIMIT ? OFFSET ?"
-    parameters.extend([limit, offset])
 
-    cursor.execute(query, parameters)
+    parameters.extend([
+        limit,
+        offset
+    ])
+
+    cursor.execute(
+        query,
+        parameters
+    )
 
     products = cursor.fetchall()
 
@@ -432,6 +452,7 @@ def search_products(
         product_data = dict(product)
 
         if product_data["prediction"]:
+
             product_data["prediction"] = json.loads(
                 product_data["prediction"]
             )
@@ -442,11 +463,14 @@ def search_products(
 
 
 # ============================================================
-# GET PRODUCT BY ID
+# GET PRODUCT BY ID - PROTECTED
 # ============================================================
 
 @app.get("/products/{product_id}")
-def get_product(product_id: int):
+def get_product(
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -479,13 +503,14 @@ def get_product(product_id: int):
 
 
 # ============================================================
-# UPDATE PRODUCT
+# UPDATE PRODUCT - PROTECTED
 # ============================================================
 
 @app.put("/products/{product_id}")
 def update_product(
     product_id: int,
-    product: Product
+    product: Product,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -541,11 +566,14 @@ def update_product(
 
 
 # ============================================================
-# DELETE PRODUCT
+# DELETE PRODUCT - PROTECTED
 # ============================================================
 
 @app.delete("/products/{product_id}")
-def delete_product(product_id: int):
+def delete_product(
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -575,7 +603,7 @@ def delete_product(product_id: int):
 
 
 # ============================================================
-# DATABASE HEALTH CHECK
+# DATABASE HEALTH CHECK - PUBLIC
 # ============================================================
 
 @app.get("/database/status")

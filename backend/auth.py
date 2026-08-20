@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import os
 
 import jwt
+from dotenv import load_dotenv
 
 from pwdlib import PasswordHash
 
@@ -14,11 +15,12 @@ from backend.database import get_connection
 # ============================================================
 # JWT CONFIGURATION
 # ============================================================
+load_dotenv()
 
-SECRET_KEY = os.getenv(
-    "JWT_SECRET_KEY",
-    "development-only-change-this-secret"
-)
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY is not set")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
