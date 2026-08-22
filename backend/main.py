@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 import json
+from datetime import datetime
 
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -24,7 +25,11 @@ from ml.src.predict import predict_price
 # CREATE FASTAPI APP
 # ============================================================
 
-app = FastAPI()
+app = FastAPI(
+    title="Expiry Dynamic Pricing API",
+    description="Backend API for expiry-aware dynamic pricing and ML prediction",
+    version="1.0.0"
+)
 
 create_table()
 create_users_table()
@@ -38,22 +43,98 @@ class Product(BaseModel):
 
     product_id: int | None = None
 
-    product_name: str
-    category: str
+    product_name: str = Field(
+        min_length=1,
+        max_length=200
+    )
+
+    category: str = Field(
+        min_length=1,
+        max_length=100
+    )
 
     stock_date: str
     expiry_date: str
 
-    current_stock: int
-    historical_sales: int
+    current_stock: int = Field(
+        ge=0
+    )
 
-    selling_price: float
+    historical_sales: int = Field(
+        ge=0
+    )
 
-    demand_rate: float
-    sales_velocity: int
+    selling_price: float = Field(
+        gt=0
+    )
 
-    days_left: int
-    expected_demand: int
+    demand_rate: float = Field(
+        ge=0
+    )
+
+    sales_velocity: int = Field(
+        ge=0
+    )
+
+    days_left: int = Field(
+        ge=0
+    )
+
+    expected_demand: int = Field(
+        ge=0
+    )
+
+    # --------------------------------------------------------
+    # DATE VALIDATION
+    # --------------------------------------------------------
+
+    @field_validator("stock_date", "expiry_date")
+    @classmethod
+    def validate_date_format(cls, value: str) -> str:
+
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+
+            raise ValueError(
+                "Date must be in YYYY-MM-DD format"
+            )
+
+        return value
+
+    # --------------------------------------------------------
+    # EXPIRY DATE VALIDATION
+    # --------------------------------------------------------
+
+    @field_validator("expiry_date")
+    @classmethod
+    def validate_expiry_date(
+        cls,
+        value: str,
+        info
+    ) -> str:
+
+        stock_date = info.data.get("stock_date")
+
+        if stock_date:
+
+            stock = datetime.strptime(
+                stock_date,
+                "%Y-%m-%d"
+            )
+
+            expiry = datetime.strptime(
+                value,
+                "%Y-%m-%d"
+            )
+
+            if expiry < stock:
+
+                raise ValueError(
+                    "expiry_date cannot be earlier than stock_date"
+                )
+
+        return value
 
 
 # ============================================================
@@ -62,9 +143,67 @@ class Product(BaseModel):
 
 class UserRegister(BaseModel):
 
-    username: str
+    username: str = Field(
+        min_length=3,
+        max_length=50
+    )
+
     email: str | None = None
-    password: str
+
+    password: str = Field(
+        min_length=6,
+        max_length=128
+    )
+
+
+# ============================================================
+# HELPER - CONVERT PRODUCT TO ML INPUT
+# ============================================================
+
+def prepare_product_data(product: Product) -> dict:
+
+    return {
+
+        "Product_Name": product.product_name,
+        "Category": product.category,
+
+        "Stock_Date": product.stock_date,
+        "Expiry_Date": product.expiry_date,
+
+        "Current_Stock": product.current_stock,
+        "Historical_Sales": product.historical_sales,
+
+        "Selling_Price": product.selling_price,
+
+        "Demand_Rate": product.demand_rate,
+        "Sales_Velocity": product.sales_velocity,
+
+        "Days_Left": product.days_left,
+        "Expected_Demand": product.expected_demand
+    }
+
+
+# ============================================================
+# HELPER - CONVERT DATABASE PRODUCT
+# ============================================================
+
+def format_product(product) -> dict:
+
+    product_data = dict(product)
+
+    if product_data.get("prediction"):
+
+        try:
+
+            product_data["prediction"] = json.loads(
+                product_data["prediction"]
+            )
+
+        except json.JSONDecodeError:
+
+            product_data["prediction"] = None
+
+    return product_data
 
 
 # ============================================================
@@ -89,7 +228,6 @@ def register_user(user: UserRegister):
     connection = get_connection()
     cursor = connection.cursor()
 
-    # Check whether username already exists
     cursor.execute(
         "SELECT id FROM users WHERE username = ?",
         (user.username,)
@@ -106,7 +244,6 @@ def register_user(user: UserRegister):
             detail="Username already registered"
         )
 
-    # Hash password before storing it
     hashed_password = get_password_hash(
         user.password
     )
@@ -222,34 +359,31 @@ def predict_product(
     current_user: dict = Depends(get_current_user)
 ):
 
-    product_data = {
+    product_data = prepare_product_data(product)
 
-        "Product_Name": product.product_name,
-        "Category": product.category,
-
-        "Stock_Date": product.stock_date,
-        "Expiry_Date": product.expiry_date,
-
-        "Current_Stock": product.current_stock,
-        "Historical_Sales": product.historical_sales,
-
-        "Selling_Price": product.selling_price,
-
-        "Demand_Rate": product.demand_rate,
-        "Sales_Velocity": product.sales_velocity,
-
-        "Days_Left": product.days_left,
-        "Expected_Demand": product.expected_demand
-    }
-
-    # Run ML prediction
     result = predict_price(product_data)
 
-    # Save prediction to database
+    # If product_id was supplied, update its prediction
     if product.product_id is not None:
 
         connection = get_connection()
         cursor = connection.cursor()
+
+        cursor.execute(
+            "SELECT id FROM products WHERE id = ?",
+            (product.product_id,)
+        )
+
+        existing_product = cursor.fetchone()
+
+        if existing_product is None:
+
+            connection.close()
+
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
 
         cursor.execute("""
             UPDATE products
@@ -276,36 +410,11 @@ def create_product(
     current_user: dict = Depends(get_current_user)
 ):
 
-    # 1. Prepare product data for ML model
-
-    product_data = {
-
-        "Product_Name": product.product_name,
-        "Category": product.category,
-
-        "Stock_Date": product.stock_date,
-        "Expiry_Date": product.expiry_date,
-
-        "Current_Stock": product.current_stock,
-        "Historical_Sales": product.historical_sales,
-
-        "Selling_Price": product.selling_price,
-
-        "Demand_Rate": product.demand_rate,
-        "Sales_Velocity": product.sales_velocity,
-
-        "Days_Left": product.days_left,
-        "Expected_Demand": product.expected_demand
-    }
-
-    # 2. Run ML prediction automatically
+    product_data = prepare_product_data(product)
 
     prediction = predict_price(product_data)
 
-    # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
-
-    # 3. Save product + prediction to database
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -360,8 +469,15 @@ def create_product(
 
 @app.get("/products")
 def get_products(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0
+    ),
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -377,21 +493,10 @@ def get_products(
 
     connection.close()
 
-    result = []
-
-    for product in products:
-
-        product_data = dict(product)
-
-        if product_data["prediction"]:
-
-            product_data["prediction"] = json.loads(
-                product_data["prediction"]
-            )
-
-        result.append(product_data)
-
-    return result
+    return [
+        format_product(product)
+        for product in products
+    ]
 
 
 # ============================================================
@@ -402,8 +507,15 @@ def get_products(
 def search_products(
     product_name: str | None = None,
     category: str | None = None,
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0
+    ),
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -445,21 +557,10 @@ def search_products(
 
     connection.close()
 
-    result = []
-
-    for product in products:
-
-        product_data = dict(product)
-
-        if product_data["prediction"]:
-
-            product_data["prediction"] = json.loads(
-                product_data["prediction"]
-            )
-
-        result.append(product_data)
-
-    return result
+    return [
+        format_product(product)
+        for product in products
+    ]
 
 
 # ============================================================
@@ -491,19 +592,11 @@ def get_product(
             detail="Product not found"
         )
 
-    product_data = dict(product)
-
-    if product_data["prediction"]:
-
-        product_data["prediction"] = json.loads(
-            product_data["prediction"]
-        )
-
-    return product_data
+    return format_product(product)
 
 
 # ============================================================
-# UPDATE PRODUCT - PROTECTED
+# UPDATE PRODUCT + RECALCULATE PREDICTION - PROTECTED
 # ============================================================
 
 @app.put("/products/{product_id}")
@@ -516,6 +609,30 @@ def update_product(
     connection = get_connection()
     cursor = connection.cursor()
 
+    # Check whether product exists
+    cursor.execute(
+        "SELECT id FROM products WHERE id = ?",
+        (product_id,)
+    )
+
+    existing_product = cursor.fetchone()
+
+    if existing_product is None:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Prepare ML input
+    product_data = prepare_product_data(product)
+
+    # Recalculate prediction
+    prediction = predict_price(product_data)
+
+    # Update product + prediction
     cursor.execute("""
         UPDATE products
         SET
@@ -529,7 +646,8 @@ def update_product(
             demand_rate = ?,
             sales_velocity = ?,
             days_left = ?,
-            expected_demand = ?
+            expected_demand = ?,
+            prediction = ?
         WHERE id = ?
     """, (
         product.product_name,
@@ -543,25 +661,17 @@ def update_product(
         product.sales_velocity,
         product.days_left,
         product.expected_demand,
+        json.dumps(prediction),
         product_id
     ))
 
     connection.commit()
-
-    if cursor.rowcount == 0:
-
-        connection.close()
-
-        raise HTTPException(
-            status_code=404,
-            detail="Product not found"
-        )
-
     connection.close()
 
     return {
         "message": "Product updated successfully",
-        "product_id": product_id
+        "product_id": product_id,
+        "prediction": prediction
     }
 
 
