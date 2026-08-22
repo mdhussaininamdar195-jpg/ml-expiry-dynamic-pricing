@@ -1,13 +1,35 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, Field
 import json
-from backend.database import create_table, get_connection
+
+from fastapi.security import OAuth2PasswordRequestForm
+
+from backend.database import (
+    create_table,
+    create_users_table,
+    get_connection
+)
+
+from backend.auth import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    get_current_user
+)
+
 from ml.src.predict import predict_price
 
 
+# ============================================================
+# CREATE FASTAPI APP
+# ============================================================
+
 app = FastAPI()
 
+
+# Create database tables when application starts
 create_table()
+create_users_table()
 
 
 # ============================================================
@@ -24,20 +46,31 @@ class Product(BaseModel):
     stock_date: str
     expiry_date: str
 
-    current_stock: int
-    historical_sales: int
+    current_stock: int = Field(ge=0)
+    historical_sales: int = Field(ge=0)
 
-    selling_price: float
+    selling_price: float = Field(ge=0)
 
-    demand_rate: float
-    sales_velocity: int
+    demand_rate: float = Field(ge=0)
+    sales_velocity: int = Field(ge=0)
 
-    days_left: int
-    expected_demand: int
+    days_left: int = Field(ge=0)
+    expected_demand: int = Field(ge=0)
 
 
 # ============================================================
-# HOME ROUTE
+# USER REGISTRATION MODEL
+# ============================================================
+
+class UserRegister(BaseModel):
+
+    username: str
+    email: str | None = None
+    password: str
+
+
+# ============================================================
+# HOME ROUTE - PUBLIC
 # ============================================================
 
 @app.get("/")
@@ -49,11 +82,202 @@ def root():
 
 
 # ============================================================
-# PRODUCT + ML PREDICTION
+# USER REGISTRATION - PUBLIC
+# ============================================================
+
+@app.post("/register")
+def register_user(user: UserRegister):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "SELECT id FROM users WHERE username = ?",
+        (user.username,)
+    )
+
+    existing_user = cursor.fetchone()
+
+    if existing_user:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Username already registered"
+        )
+
+    hashed_password = get_password_hash(
+        user.password
+    )
+
+    cursor.execute("""
+        INSERT INTO users (
+            username,
+            email,
+            hashed_password
+        )
+        VALUES (?, ?, ?)
+    """, (
+        user.username,
+        user.email,
+        hashed_password
+    ))
+
+    connection.commit()
+
+    user_id = cursor.lastrowid
+
+    connection.close()
+
+    return {
+        "message": "User registered successfully",
+        "user_id": user_id,
+        "username": user.username
+    }
+
+
+# ============================================================
+# LOGIN + JWT TOKEN - PUBLIC
+# ============================================================
+
+@app.post("/token")
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            id,
+            username,
+            hashed_password,
+            is_active
+        FROM users
+        WHERE username = ?
+    """, (
+        form_data.username,
+    ))
+
+    user = cursor.fetchone()
+
+    connection.close()
+
+    if user is None:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password"
+        )
+
+    if not verify_password(
+        form_data.password,
+        user["hashed_password"]
+    ):
+
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password"
+        )
+
+    if not user["is_active"]:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Inactive user"
+        )
+
+    access_token = create_access_token(
+        data={
+            "sub": user["username"]
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
+
+# ============================================================
+# CURRENT USER - PROTECTED
+# ============================================================
+
+@app.get("/auth/me")
+def read_current_user(
+    current_user: dict = Depends(get_current_user)
+):
+
+    return {
+        "message": "Authentication successful",
+        "user": current_user
+    }
+
+
+# ============================================================
+# PRODUCT + ML PREDICTION - PROTECTED
 # ============================================================
 
 @app.post("/predict")
-def predict_product(product: Product):
+def predict_product(
+    product: Product,
+    current_user: dict = Depends(get_current_user)
+):
+
+    product_data = {
+
+        "Product_Name": product.product_name,
+        "Category": product.category,
+
+        "Stock_Date": product.stock_date,
+        "Expiry_Date": product.expiry_date,
+
+        "Current_Stock": product.current_stock,
+        "Historical_Sales": product.historical_sales,
+
+        "Selling_Price": product.selling_price,
+
+        "Demand_Rate": product.demand_rate,
+        "Sales_Velocity": product.sales_velocity,
+
+        "Days_Left": product.days_left,
+        "Expected_Demand": product.expected_demand
+    }
+
+    result = predict_price(product_data)
+
+    # Save prediction if product_id is provided
+    if product.product_id is not None:
+
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            UPDATE products
+            SET prediction = ?
+            WHERE id = ?
+        """, (
+            json.dumps(result),
+            product.product_id
+        ))
+
+        connection.commit()
+        connection.close()
+
+    return result
+
+
+# ============================================================
+# CREATE PRODUCT + AUTOMATIC ML PREDICTION - PROTECTED
+# ============================================================
+
+@app.post("/products")
+def create_product(
+    product: Product,
+    current_user: dict = Depends(get_current_user)
+):
 
     product_data = {
 
@@ -76,71 +300,9 @@ def predict_product(product: Product):
     }
 
     # Run ML prediction
-    result = predict_price(product_data)
-
-    # Save prediction to database
-    if product.product_id is not None:
-
-        connection = get_connection()
-        cursor = connection.cursor()
-
-        cursor.execute("""
-            UPDATE products
-            SET prediction = ?
-            WHERE id = ?
-        """, (
-            json.dumps(result),
-            product.product_id
-        ))
-
-        connection.commit()
-        connection.close()
-
-    return result
-
-
-# ============================================================
-# CREATE PRODUCT + AUTOMATIC ML PREDICTION
-# ============================================================
-
-@app.post("/products")
-def create_product(product: Product):
-
-    # ============================================================
-    # 1. Prepare product data for ML model
-    # ============================================================
-
-    product_data = {
-        "Product_Name": product.product_name,
-        "Category": product.category,
-
-        "Stock_Date": product.stock_date,
-        "Expiry_Date": product.expiry_date,
-
-        "Current_Stock": product.current_stock,
-        "Historical_Sales": product.historical_sales,
-
-        "Selling_Price": product.selling_price,
-
-        "Demand_Rate": product.demand_rate,
-        "Sales_Velocity": product.sales_velocity,
-
-        "Days_Left": product.days_left,
-        "Expected_Demand": product.expected_demand
-    }
-
-    # ============================================================
-    # 2. Run ML prediction automatically
-    # ============================================================
-
     prediction = predict_price(product_data)
 
-    # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
-
-    # ============================================================
-    # 3. Save product + prediction to database
-    # ============================================================
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -190,17 +352,14 @@ def create_product(product: Product):
 
 
 # ============================================================
-# GET ALL PRODUCTS
-# ============================================================
-
-# ============================================================
-# GET ALL PRODUCTS WITH PAGINATION
+# GET ALL PRODUCTS - PROTECTED
 # ============================================================
 
 @app.get("/products")
 def get_products(
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -233,12 +392,7 @@ def get_products(
 
 
 # ============================================================
-# SEARCH PRODUCTS
-# IMPORTANT: THIS MUST COME BEFORE /products/{product_id}
-# ============================================================
-
-# ============================================================
-# SEARCH PRODUCTS
+# SEARCH PRODUCTS - PROTECTED
 # ============================================================
 
 @app.get("/products/search")
@@ -246,28 +400,44 @@ def search_products(
     product_name: str | None = None,
     category: str | None = None,
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
     cursor = connection.cursor()
 
     query = "SELECT * FROM products WHERE 1=1"
+
     parameters = []
 
     if product_name:
+
         query += " AND product_name LIKE ?"
-        parameters.append(f"%{product_name}%")
+
+        parameters.append(
+            f"%{product_name}%"
+        )
 
     if category:
+
         query += " AND category LIKE ?"
-        parameters.append(f"%{category}%")
 
-    # Limit the number of results
+        parameters.append(
+            f"%{category}%"
+        )
+
     query += " LIMIT ? OFFSET ?"
-    parameters.extend([limit, offset])
 
-    cursor.execute(query, parameters)
+    parameters.extend([
+        limit,
+        offset
+    ])
+
+    cursor.execute(
+        query,
+        parameters
+    )
 
     products = cursor.fetchall()
 
@@ -280,6 +450,7 @@ def search_products(
         product_data = dict(product)
 
         if product_data["prediction"]:
+
             product_data["prediction"] = json.loads(
                 product_data["prediction"]
             )
@@ -290,11 +461,14 @@ def search_products(
 
 
 # ============================================================
-# GET PRODUCT BY ID
+# GET PRODUCT BY ID - PROTECTED
 # ============================================================
 
 @app.get("/products/{product_id}")
-def get_product(product_id: int):
+def get_product(
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -327,13 +501,14 @@ def get_product(product_id: int):
 
 
 # ============================================================
-# UPDATE PRODUCT
+# UPDATE PRODUCT - PROTECTED
 # ============================================================
 
 @app.put("/products/{product_id}")
 def update_product(
     product_id: int,
-    product: Product
+    product: Product,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -389,11 +564,14 @@ def update_product(
 
 
 # ============================================================
-# DELETE PRODUCT
+# DELETE PRODUCT - PROTECTED
 # ============================================================
 
 @app.delete("/products/{product_id}")
-def delete_product(product_id: int):
+def delete_product(
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -423,7 +601,7 @@ def delete_product(product_id: int):
 
 
 # ============================================================
-# DATABASE HEALTH CHECK
+# DATABASE HEALTH CHECK - PUBLIC
 # ============================================================
 
 @app.get("/database/status")
