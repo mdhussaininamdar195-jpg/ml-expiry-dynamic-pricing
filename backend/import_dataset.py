@@ -1,17 +1,24 @@
 import sqlite3
+from pathlib import Path
+
 import pandas as pd
+
 
 # ============================================================
 # PATHS
 # ============================================================
 
-CSV_PATH = "ml/datasets/raw/synthetic_expiry_pricing_dataset.csv"
-DB_PATH = "products.db"
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+CSV_PATH = BASE_DIR / "ml" / "datasets" / "raw" / "synthetic_expiry_pricing_dataset.csv"
+DB_PATH = BASE_DIR / "products.db"
 
 
 # ============================================================
 # LOAD DATASET
 # ============================================================
+
+print("Loading dataset...")
 
 df = pd.read_csv(CSV_PATH)
 
@@ -24,6 +31,7 @@ print("Total rows:", len(df))
 # ============================================================
 
 connection = sqlite3.connect(DB_PATH)
+
 cursor = connection.cursor()
 
 
@@ -47,16 +55,9 @@ for _, row in df.iterrows():
             demand_rate,
             sales_velocity,
             days_left,
-            expected_demand,
-            dataset_product_id,
-            discount,
-            final_price,
-            wastage_quantity,
-            expiry_risk,
-            waste_risk,
-            recommended_discount
+            expected_demand
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         row["Product_Name"],
         row["Category"],
@@ -68,14 +69,7 @@ for _, row in df.iterrows():
         float(row["Demand_Rate"]),
         int(row["Sales_Velocity"]),
         int(row["Days_Left"]),
-        int(row["Expected_Demand"]),
-        row["Product_ID"],
-        float(row["Discount"]),
-        float(row["Final_Price"]),
-        int(row["Wastage_Quantity"]),
-        float(row["Expiry_Risk"]),
-        row["Waste_Risk"],
-        float(row["Recommended_Discount"])
+        int(row["Expected_Demand"])
     ))
 
     inserted += 1
