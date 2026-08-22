@@ -1,61 +1,113 @@
 import sqlite3
 from pathlib import Path
 
+
+# ============================================================
+# DATABASE CONFIGURATION
+# ============================================================
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 DATABASE_PATH = BASE_DIR / "products.db"
 
 
+# ============================================================
+# DATABASE CONNECTION
+# ============================================================
+
 def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
+
+    connection = sqlite3.connect(
+        DATABASE_PATH
+    )
+
     connection.row_factory = sqlite3.Row
+
     return connection
 
 
+# ============================================================
+# PRODUCTS TABLE
+# ============================================================
+
 def create_table():
+
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    try:
 
-            product_name TEXT NOT NULL,
-            category TEXT NOT NULL,
+        cursor = connection.cursor()
 
-            stock_date TEXT,
-            expiry_date TEXT,
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS products (
 
-            current_stock INTEGER,
-            historical_sales INTEGER,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-            selling_price REAL,
+                product_name TEXT NOT NULL,
+                category TEXT NOT NULL,
 
-            demand_rate REAL,
-            sales_velocity INTEGER,
+                stock_date TEXT,
+                expiry_date TEXT,
 
-            days_left INTEGER,
-            expected_demand INTEGER,
+                current_stock INTEGER,
+                historical_sales INTEGER,
 
-            prediction TEXT
-        )
-    """)
+                selling_price REAL,
 
-    connection.commit()
-    connection.close()
+                demand_rate REAL,
+                sales_velocity INTEGER,
+
+                days_left INTEGER,
+                expected_demand INTEGER,
+
+                prediction TEXT,
+
+                -- Dataset fields
+                dataset_product_id INTEGER,
+                discount REAL,
+                final_price REAL,
+                wastage_quantity INTEGER,
+                expiry_risk REAL,
+                waste_risk TEXT,
+                recommended_discount REAL
+            )
+        """)
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
+
+
+# ============================================================
+# USERS TABLE - JWT AUTHENTICATION
+# ============================================================
+
 def create_users_table():
+
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE,
-            hashed_password TEXT NOT NULL,
-            is_active INTEGER DEFAULT 1
-        )
-    """)
+    try:
 
-    connection.commit()
-    connection.close()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE,
+
+                hashed_password TEXT NOT NULL,
+
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
