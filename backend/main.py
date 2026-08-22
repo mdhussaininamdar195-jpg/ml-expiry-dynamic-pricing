@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import json
 
 from fastapi.security import OAuth2PasswordRequestForm
@@ -26,8 +26,6 @@ from ml.src.predict import predict_price
 
 app = FastAPI()
 
-
-# Create database tables when application starts
 create_table()
 create_users_table()
 
@@ -46,16 +44,16 @@ class Product(BaseModel):
     stock_date: str
     expiry_date: str
 
-    current_stock: int = Field(ge=0)
-    historical_sales: int = Field(ge=0)
+    current_stock: int
+    historical_sales: int
 
-    selling_price: float = Field(ge=0)
+    selling_price: float
 
-    demand_rate: float = Field(ge=0)
-    sales_velocity: int = Field(ge=0)
+    demand_rate: float
+    sales_velocity: int
 
-    days_left: int = Field(ge=0)
-    expected_demand: int = Field(ge=0)
+    days_left: int
+    expected_demand: int
 
 
 # ============================================================
@@ -91,6 +89,7 @@ def register_user(user: UserRegister):
     connection = get_connection()
     cursor = connection.cursor()
 
+    # Check whether username already exists
     cursor.execute(
         "SELECT id FROM users WHERE username = ?",
         (user.username,)
@@ -107,6 +106,7 @@ def register_user(user: UserRegister):
             detail="Username already registered"
         )
 
+    # Hash password before storing it
     hashed_password = get_password_hash(
         user.password
     )
@@ -150,11 +150,7 @@ def login(
     cursor = connection.cursor()
 
     cursor.execute("""
-        SELECT
-            id,
-            username,
-            hashed_password,
-            is_active
+        SELECT id, username, hashed_password, is_active
         FROM users
         WHERE username = ?
     """, (
@@ -246,9 +242,10 @@ def predict_product(
         "Expected_Demand": product.expected_demand
     }
 
+    # Run ML prediction
     result = predict_price(product_data)
 
-    # Save prediction if product_id is provided
+    # Save prediction to database
     if product.product_id is not None:
 
         connection = get_connection()
@@ -279,6 +276,8 @@ def create_product(
     current_user: dict = Depends(get_current_user)
 ):
 
+    # 1. Prepare product data for ML model
+
     product_data = {
 
         "Product_Name": product.product_name,
@@ -299,10 +298,14 @@ def create_product(
         "Expected_Demand": product.expected_demand
     }
 
-    # Run ML prediction
+    # 2. Run ML prediction automatically
+
     prediction = predict_price(product_data)
 
+    # Convert prediction dictionary to JSON
     prediction_json = json.dumps(prediction)
+
+    # 3. Save product + prediction to database
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -408,7 +411,6 @@ def search_products(
     cursor = connection.cursor()
 
     query = "SELECT * FROM products WHERE 1=1"
-
     parameters = []
 
     if product_name:

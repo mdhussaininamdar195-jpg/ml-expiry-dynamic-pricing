@@ -1,39 +1,23 @@
 import sqlite3
 from pathlib import Path
 
-
-# ============================================================
-# DATABASE PATH
-# ============================================================
-
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 DATABASE_PATH = BASE_DIR / "products.db"
 
 
-# ============================================================
-# DATABASE CONNECTION
-# ============================================================
-
 def get_connection():
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
-
     return connection
 
 
-# ============================================================
-# CREATE PRODUCTS TABLE
-# ============================================================
-
 def create_table():
-
     connection = get_connection()
     cursor = connection.cursor()
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
-
             id INTEGER PRIMARY KEY AUTOINCREMENT,
 
             product_name TEXT NOT NULL,
@@ -59,27 +43,16 @@ def create_table():
 
     connection.commit()
     connection.close()
-
-
-# ============================================================
-# CREATE USERS TABLE
-# ============================================================
-
 def create_users_table():
-
     connection = get_connection()
     cursor = connection.cursor()
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE,
-
             hashed_password TEXT NOT NULL,
-
             is_active INTEGER DEFAULT 1
         )
     """)
