@@ -513,6 +513,32 @@ def update_product(
     current_user: dict = Depends(get_current_user)
 ):
 
+    # Prepare updated product data for ML prediction
+    product_data = {
+        "Product_Name": product.product_name,
+        "Category": product.category,
+
+        "Stock_Date": product.stock_date,
+        "Expiry_Date": product.expiry_date,
+
+        "Current_Stock": product.current_stock,
+        "Historical_Sales": product.historical_sales,
+
+        "Selling_Price": product.selling_price,
+
+        "Demand_Rate": product.demand_rate,
+        "Sales_Velocity": product.sales_velocity,
+
+        "Days_Left": product.days_left,
+        "Expected_Demand": product.expected_demand
+    }
+
+    # Recalculate prediction using updated values
+    prediction = predict_price(product_data)
+
+    # Convert prediction to JSON for SQLite
+    prediction_json = json.dumps(prediction)
+
     connection = get_connection()
     cursor = connection.cursor()
 
@@ -529,7 +555,8 @@ def update_product(
             demand_rate = ?,
             sales_velocity = ?,
             days_left = ?,
-            expected_demand = ?
+            expected_demand = ?,
+            prediction = ?
         WHERE id = ?
     """, (
         product.product_name,
@@ -543,13 +570,13 @@ def update_product(
         product.sales_velocity,
         product.days_left,
         product.expected_demand,
+        prediction_json,
         product_id
     ))
 
     connection.commit()
 
     if cursor.rowcount == 0:
-
         connection.close()
 
         raise HTTPException(
@@ -561,9 +588,9 @@ def update_product(
 
     return {
         "message": "Product updated successfully",
-        "product_id": product_id
+        "product_id": product_id,
+        "prediction": prediction
     }
-
 
 # ============================================================
 # DELETE PRODUCT - PROTECTED
