@@ -111,3 +111,40 @@ def create_users_table():
     finally:
 
         connection.close()
+
+
+# ============================================================
+# PURCHASES TABLE
+# ============================================================
+
+def create_purchases_table():
+
+    connection = get_connection()
+
+    try:
+
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS purchases (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                product_id INTEGER NOT NULL,
+                quantity INTEGER NOT NULL,
+
+                price_per_unit REAL NOT NULL,
+                total_amount REAL NOT NULL,
+
+                purchased_at TEXT NOT NULL,
+
+                FOREIGN KEY (product_id)
+                REFERENCES products(id)
+            )
+        """)
+
+        connection.commit()
+
+    finally:
+
+        connection.close()

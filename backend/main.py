@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from backend.database import (
     create_table,
     create_users_table,
+    create_purchases_table,
     get_connection
 )
 
@@ -28,6 +29,7 @@ app = FastAPI()
 
 create_table()
 create_users_table()
+create_purchases_table()
 
 
 # ============================================================
@@ -577,6 +579,7 @@ def update_product(
     connection.commit()
 
     if cursor.rowcount == 0:
+
         connection.close()
 
         raise HTTPException(
@@ -591,6 +594,7 @@ def update_product(
         "product_id": product_id,
         "prediction": prediction
     }
+
 
 # ============================================================
 # DELETE PRODUCT - PROTECTED
