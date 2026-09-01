@@ -716,6 +716,50 @@ def purchase_product(
         "remaining_stock": new_stock
     }
 
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
+@app.get("/dashboard/stats")
+def dashboard_stats(
+    current_user: dict = Depends(get_current_user)
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Total number of products purchased
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+    """)
+
+    total_products_saved = cursor.fetchone()[0]
+
+    # Total amount recouped from purchases
+    cursor.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM purchases
+    """)
+
+    total_amount_recouped = cursor.fetchone()[0]
+
+    # Number of purchase transactions
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM purchases
+    """)
+
+    total_purchases = cursor.fetchone()[0]
+
+    connection.close()
+
+    return {
+        "total_purchases": total_purchases,
+        "total_products_saved": total_products_saved,
+        "total_amount_recouped": round(total_amount_recouped, 2)
+    }
+
 @app.delete("/products/{product_id}")
 def delete_product(
     product_id: int,
