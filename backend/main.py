@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from backend.database import (
     create_table,
     create_users_table,
+    create_purchases_table,
     get_connection
 )
 
@@ -28,6 +29,7 @@ app = FastAPI()
 
 create_table()
 create_users_table()
+create_purchases_table()
 
 
 # ============================================================
@@ -65,6 +67,13 @@ class UserRegister(BaseModel):
     username: str
     email: str | None = None
     password: str
+# ============================================================
+# PURCHASE INPUT MODEL
+# ============================================================
+
+class PurchaseRequest(BaseModel):
+
+    quantity: int
 
 
 # ============================================================
@@ -577,6 +586,7 @@ def update_product(
     connection.commit()
 
     if cursor.rowcount == 0:
+
         connection.close()
 
         raise HTTPException(
@@ -592,9 +602,198 @@ def update_product(
         "prediction": prediction
     }
 
+
 # ============================================================
 # DELETE PRODUCT - PROTECTED
 # ============================================================
+
+# ============================================================
+# PURCHASE PRODUCT - PROTECTED
+# ============================================================
+
+@app.post("/products/{product_id}/purchase")
+def purchase_product(
+    product_id: int,
+    purchase: PurchaseRequest,
+    current_user: dict = Depends(get_current_user)
+):
+
+    if purchase.quantity <= 0:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Quantity must be greater than 0"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Get product
+    cursor.execute("""
+    SELECT id, product_name, current_stock, selling_price,
+           prediction, days_left, waste_risk
+    FROM products
+    WHERE id = ?
+""", (product_id,))
+
+    product = cursor.fetchone()
+
+    if product is None:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Check stock
+    if product["current_stock"] < purchase.quantity:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough stock available"
+        )
+
+    # Determine actual selling price
+    price_per_unit = product["selling_price"]
+
+    if product["prediction"]:
+
+        prediction = json.loads(product["prediction"])
+
+        price_per_unit = prediction.get(
+            "final_price",
+            price_per_unit
+        )
+
+    total_amount = price_per_unit * purchase.quantity
+
+    # Reduce stock
+    new_stock = product["current_stock"] - purchase.quantity
+
+    cursor.execute("""
+        UPDATE products
+        SET current_stock = ?
+        WHERE id = ?
+    """, (
+        new_stock,
+        product_id
+    ))
+
+    # Record purchase
+    cursor.execute("""
+    INSERT INTO purchases (
+        product_id,
+        quantity,
+        price_per_unit,
+        total_amount,
+        purchased_at,
+        days_left_at_purchase,
+        waste_risk_at_purchase
+    )
+    VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
+""", (
+    product_id,
+    purchase.quantity,
+    price_per_unit,
+    total_amount,
+    product["days_left"],
+    product["waste_risk"]
+))
+    connection.commit()
+
+    purchase_id = cursor.lastrowid
+
+    connection.close()
+
+    return {
+        "message": "Purchase successful",
+        "purchase_id": purchase_id,
+        "product_id": product_id,
+        "product_name": product["product_name"],
+        "quantity": purchase.quantity,
+        "price_per_unit": float(price_per_unit),
+        "total_amount": float(total_amount),
+        "remaining_stock": new_stock
+    }
+
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
+@app.get("/dashboard/stats")
+def dashboard_stats(
+    current_user: dict = Depends(get_current_user)
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Total number of products purchased
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+    """)
+
+    total_products_purchased = cursor.fetchone()[0]
+
+    # Total amount recouped from purchases
+    cursor.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM purchases
+    """)
+
+    total_amount_recouped = cursor.fetchone()[0]
+
+    # Number of purchase transactions
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM purchases
+    """)
+
+    total_purchases = cursor.fetchone()[0]
+
+    # Products purchased while close to expiry
+    # We define close to expiry as 3 days or less remaining.
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+
+    products_saved_from_waste = cursor.fetchone()[0]
+
+    # Calculate sustainability rate
+    if total_products_purchased > 0:
+
+        sustainability_rate = (
+            products_saved_from_waste
+            / total_products_purchased
+        ) * 100
+
+    else:
+
+        sustainability_rate = 0
+
+    connection.close()
+
+    return {
+        "total_purchases": total_purchases,
+        "total_products_purchased": total_products_purchased,
+        "products_saved_from_waste": products_saved_from_waste,
+        "sustainability_rate": round(sustainability_rate, 2),
+        "total_amount_recouped": round(
+            total_amount_recouped,
+            2
+        )
+    }
 
 @app.delete("/products/{product_id}")
 def delete_product(
