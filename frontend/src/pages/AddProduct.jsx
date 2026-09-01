@@ -19,12 +19,16 @@ function ImageIcon() {
   );
 }
 
-function EditProduct({ product, onBack, onSave }) {
+function AddProduct({ onBack, onSave }) {
   const [formData, setFormData] = useState({
-    name: product?.name || "",
-    category: product?.category || "Dairy",
-    price: product?.price || "",
-    stock: product?.stock || "",
+    name: "",
+    category: "Dairy",
+    size: "",
+    price: "",
+    originalPrice: "",
+    stock: "",
+    daysLeft: "",
+    risk: "Low",
   });
 
   const [imagePreview, setImagePreview] = useState(null);
@@ -58,16 +62,28 @@ function EditProduct({ product, onBack, onSave }) {
   function handleSubmit(event) {
     event.preventDefault();
 
-    const updatedProduct = {
-      ...product,
-      ...formData,
+    const newProduct = {
+      id: Date.now(),
+      name: formData.name.trim(),
+      category: formData.category,
+      size: formData.size.trim(),
       price: Number(formData.price),
+      originalPrice: Number(formData.originalPrice || formData.price),
       stock: Number(formData.stock),
+      daysLeft: Number(formData.daysLeft),
+      risk: formData.risk,
+      status:
+        Number(formData.daysLeft) <= 2
+          ? "Near expiry"
+          : Number(formData.price) <
+              Number(formData.originalPrice || formData.price)
+            ? "Reduced price"
+            : "Fresh",
       imagePreview,
     };
 
     if (onSave) {
-      onSave(updatedProduct);
+      onSave(newProduct);
     }
   }
 
@@ -83,12 +99,14 @@ function EditProduct({ product, onBack, onSave }) {
             ← Back to products
           </button>
 
-          <span className="edit-eyebrow">Product management</span>
+          <span className="edit-eyebrow">
+            Product management
+          </span>
 
-          <h1>Edit product</h1>
+          <h1>Add product</h1>
 
           <p>
-            Update product information shown across the store.
+            Add a new product to the store catalogue.
           </p>
         </div>
       </div>
@@ -100,7 +118,10 @@ function EditProduct({ product, onBack, onSave }) {
         <section className="edit-section">
           <div className="section-heading">
             <h2>Product information</h2>
-            <p>Basic information about this product.</p>
+
+            <p>
+              Basic information about this product.
+            </p>
           </div>
 
           <div className="form-grid">
@@ -125,11 +146,24 @@ function EditProduct({ product, onBack, onSave }) {
                 value={formData.category}
                 onChange={handleChange}
               >
-                <option>Dairy</option>
-                <option>Bakery</option>
-                <option>Produce</option>
-                <option>Beverages</option>
+                <option value="Dairy">Dairy</option>
+                <option value="Bakery">Bakery</option>
+                <option value="Produce">Produce</option>
+                <option value="Beverages">Beverages</option>
               </select>
+            </label>
+
+            <label className="form-field">
+              <span>Pack size</span>
+
+              <input
+                type="text"
+                name="size"
+                value={formData.size}
+                onChange={handleChange}
+                placeholder="Example: 1 L"
+                required
+              />
             </label>
 
             <label className="form-field">
@@ -145,7 +179,26 @@ function EditProduct({ product, onBack, onSave }) {
                   onChange={handleChange}
                   min="0"
                   step="0.01"
+                  placeholder="0.00"
                   required
+                />
+              </div>
+            </label>
+
+            <label className="form-field">
+              <span>Original price</span>
+
+              <div className="price-input">
+                <span>₹</span>
+
+                <input
+                  type="number"
+                  name="originalPrice"
+                  value={formData.originalPrice}
+                  onChange={handleChange}
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
                 />
               </div>
             </label>
@@ -159,8 +212,37 @@ function EditProduct({ product, onBack, onSave }) {
                 value={formData.stock}
                 onChange={handleChange}
                 min="0"
+                placeholder="0"
                 required
               />
+            </label>
+
+            <label className="form-field">
+              <span>Days until expiry</span>
+
+              <input
+                type="number"
+                name="daysLeft"
+                value={formData.daysLeft}
+                onChange={handleChange}
+                min="0"
+                placeholder="Example: 7"
+                required
+              />
+            </label>
+
+            <label className="form-field">
+              <span>Expiry risk</span>
+
+              <select
+                name="risk"
+                value={formData.risk}
+                onChange={handleChange}
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+              </select>
             </label>
           </div>
         </section>
@@ -233,7 +315,7 @@ function EditProduct({ product, onBack, onSave }) {
             type="submit"
             className="save-product-button"
           >
-            Save changes
+            Add product
           </button>
         </div>
       </form>
@@ -241,4 +323,4 @@ function EditProduct({ product, onBack, onSave }) {
   );
 }
 
-export default EditProduct;
+export default AddProduct;
