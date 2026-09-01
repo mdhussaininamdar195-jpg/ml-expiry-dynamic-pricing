@@ -67,6 +67,13 @@ class UserRegister(BaseModel):
     username: str
     email: str | None = None
     password: str
+# ============================================================
+# PURCHASE INPUT MODEL
+# ============================================================
+
+class PurchaseRequest(BaseModel):
+
+    quantity: int
 
 
 # ============================================================
@@ -599,6 +606,115 @@ def update_product(
 # ============================================================
 # DELETE PRODUCT - PROTECTED
 # ============================================================
+
+# ============================================================
+# PURCHASE PRODUCT - PROTECTED
+# ============================================================
+
+@app.post("/products/{product_id}/purchase")
+def purchase_product(
+    product_id: int,
+    purchase: PurchaseRequest,
+    current_user: dict = Depends(get_current_user)
+):
+
+    if purchase.quantity <= 0:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Quantity must be greater than 0"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Get product
+    cursor.execute("""
+        SELECT id, product_name, current_stock, selling_price, prediction
+        FROM products
+        WHERE id = ?
+    """, (product_id,))
+
+    product = cursor.fetchone()
+
+    if product is None:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    # Check stock
+    if product["current_stock"] < purchase.quantity:
+
+        connection.close()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough stock available"
+        )
+
+    # Determine actual selling price
+    price_per_unit = product["selling_price"]
+
+    if product["prediction"]:
+
+        prediction = json.loads(product["prediction"])
+
+        price_per_unit = prediction.get(
+            "final_price",
+            price_per_unit
+        )
+
+    total_amount = price_per_unit * purchase.quantity
+
+    # Reduce stock
+    new_stock = product["current_stock"] - purchase.quantity
+
+    cursor.execute("""
+        UPDATE products
+        SET current_stock = ?
+        WHERE id = ?
+    """, (
+        new_stock,
+        product_id
+    ))
+
+    # Record purchase
+    cursor.execute("""
+        INSERT INTO purchases (
+            product_id,
+            quantity,
+            price_per_unit,
+            total_amount,
+            purchased_at
+        )
+        VALUES (?, ?, ?, ?, datetime('now'))
+    """, (
+        product_id,
+        purchase.quantity,
+        price_per_unit,
+        total_amount
+    ))
+
+    connection.commit()
+
+    purchase_id = cursor.lastrowid
+
+    connection.close()
+
+    return {
+        "message": "Purchase successful",
+        "purchase_id": purchase_id,
+        "product_id": product_id,
+        "product_name": product["product_name"],
+        "quantity": purchase.quantity,
+        "price_per_unit": float(price_per_unit),
+        "total_amount": float(total_amount),
+        "remaining_stock": new_stock
+    }
 
 @app.delete("/products/{product_id}")
 def delete_product(
