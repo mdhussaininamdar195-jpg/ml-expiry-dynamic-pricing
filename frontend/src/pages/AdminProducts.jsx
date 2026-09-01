@@ -99,28 +99,40 @@ function EditIcon() {
 }
 
 function AdminProducts() {
-  const [editingProduct, setEditingProduct] = useState(null);
+    const [editingProduct, setEditingProduct] = useState(null);
+    const [productList, setProductList] = useState(products);
 
-  if (editingProduct) {
+    if (editingProduct) {
+        return (
+            <EditProduct
+                product={editingProduct}
+                onBack={() => setEditingProduct(null)}
+                onSave={(updatedProduct) => {
+                    setProductList((currentProducts) =>
+                        currentProducts.map((product) =>
+                            product.id === updatedProduct.id
+                                ? updatedProduct
+                                : product
+                        )
+                    );
+
+                    setEditingProduct(null);
+                }}
+            />
+        );
+    }
+
     return (
-      <EditProduct
-        product={editingProduct}
-        onBack={() => setEditingProduct(null)}
-        onSave={(updatedProduct) => {
-          console.log("Updated product:", updatedProduct);
-          setEditingProduct(null);
-        }}
-      />
-    );
-  }
-
-  return (
         <div className="admin-products-page">
             <header className="admin-page-header">
                 <div>
                     <span className="admin-eyebrow">Administration</span>
+
                     <h1>Products</h1>
-                    <p>Manage your store catalogue and inventory information.</p>
+
+                    <p>
+                        Manage your store catalogue and inventory information.
+                    </p>
                 </div>
 
                 <button className="add-product-button">
@@ -132,6 +144,7 @@ function AdminProducts() {
             <section className="product-toolbar">
                 <div className="admin-search">
                     <SearchIcon />
+
                     <input
                         type="search"
                         placeholder="Search products"
@@ -139,7 +152,10 @@ function AdminProducts() {
                     />
                 </div>
 
-                <select className="filter-select" defaultValue="all">
+                <select
+                    className="filter-select"
+                    defaultValue="all"
+                >
                     <option value="all">All categories</option>
                     <option value="dairy">Dairy</option>
                     <option value="bakery">Bakery</option>
@@ -147,7 +163,10 @@ function AdminProducts() {
                     <option value="beverages">Beverages</option>
                 </select>
 
-                <select className="filter-select" defaultValue="all-risk">
+                <select
+                    className="filter-select"
+                    defaultValue="all-risk"
+                >
                     <option value="all-risk">All risk levels</option>
                     <option value="high">High risk</option>
                     <option value="medium">Medium risk</option>
@@ -159,7 +178,10 @@ function AdminProducts() {
                 <div className="products-panel-header">
                     <div>
                         <h2>Product catalogue</h2>
-                        <span>{products.length} products</span>
+
+                        <span>
+                            {productList.length} products
+                        </span>
                     </div>
                 </div>
 
@@ -178,28 +200,44 @@ function AdminProducts() {
                         </thead>
 
                         <tbody>
-                            {products.map((product) => (
+                            {productList.map((product) => (
                                 <tr key={product.id}>
                                     <td>
                                         <div className="table-product">
                                             <div className="table-product-image">
-                                                {product.name.charAt(0)}
+                                                {product.imagePreview ? (
+                                                    <img
+                                                        src={product.imagePreview}
+                                                        alt={product.name}
+                                                    />
+                                                ) : (
+                                                    product.name.charAt(0)
+                                                )}
                                             </div>
 
                                             <div>
                                                 <strong>{product.name}</strong>
-                                                <span>Product #{product.id}</span>
+
+                                                <span>
+                                                    Product #{product.id}
+                                                </span>
                                             </div>
                                         </div>
                                     </td>
 
-                                    <td>{product.category}</td>
-
                                     <td>
-                                        <strong>₹{product.price}</strong>
+                                        {product.category}
                                     </td>
 
-                                    <td>{product.stock}</td>
+                                    <td>
+                                        <strong>
+                                            ₹{product.price}
+                                        </strong>
+                                    </td>
+
+                                    <td>
+                                        {product.stock}
+                                    </td>
 
                                     <td>
                                         <span
@@ -216,7 +254,9 @@ function AdminProducts() {
                                     </td>
 
                                     <td>
-                                        <span className={`risk-badge ${product.risk.toLowerCase()}`}>
+                                        <span
+                                            className={`risk-badge ${product.risk.toLowerCase()}`}
+                                        >
                                             {product.risk}
                                         </span>
                                     </td>
@@ -224,10 +264,15 @@ function AdminProducts() {
                                     <td>
                                         <button
                                             className="edit-product-button"
-                                            onClick={() => setEditingProduct(product)}
+                                            onClick={() =>
+                                                setEditingProduct(product)
+                                            }
                                         >
                                             <EditIcon />
-                                            <span>Edit</span>
+
+                                            <span>
+                                                Edit
+                                            </span>
                                         </button>
                                     </td>
                                 </tr>
