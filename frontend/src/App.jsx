@@ -1,8 +1,8 @@
 import "./App.css";
-import CustomerHome from "./pages/CustomerHome";
+import AdminProducts from "./pages/AdminProducts";
 
 function App() {
-  return <CustomerHome />;
+  return <AdminProducts />;
 }
 
 export default App;
