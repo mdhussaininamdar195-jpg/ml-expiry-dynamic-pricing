@@ -630,10 +630,11 @@ def purchase_product(
 
     # Get product
     cursor.execute("""
-        SELECT id, product_name, current_stock, selling_price, prediction
-        FROM products
-        WHERE id = ?
-    """, (product_id,))
+    SELECT id, product_name, current_stock, selling_price,
+           prediction, days_left, waste_risk
+    FROM products
+    WHERE id = ?
+""", (product_id,))
 
     product = cursor.fetchone()
 
@@ -684,21 +685,24 @@ def purchase_product(
 
     # Record purchase
     cursor.execute("""
-        INSERT INTO purchases (
-            product_id,
-            quantity,
-            price_per_unit,
-            total_amount,
-            purchased_at
-        )
-        VALUES (?, ?, ?, ?, datetime('now'))
-    """, (
+    INSERT INTO purchases (
         product_id,
-        purchase.quantity,
+        quantity,
         price_per_unit,
-        total_amount
-    ))
-
+        total_amount,
+        purchased_at,
+        days_left_at_purchase,
+        waste_risk_at_purchase
+    )
+    VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
+""", (
+    product_id,
+    purchase.quantity,
+    price_per_unit,
+    total_amount,
+    product["days_left"],
+    product["waste_risk"]
+))
     connection.commit()
 
     purchase_id = cursor.lastrowid
@@ -720,6 +724,10 @@ def purchase_product(
 # DASHBOARD STATISTICS - PROTECTED
 # ============================================================
 
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
 @app.get("/dashboard/stats")
 def dashboard_stats(
     current_user: dict = Depends(get_current_user)
@@ -734,7 +742,7 @@ def dashboard_stats(
         FROM purchases
     """)
 
-    total_products_saved = cursor.fetchone()[0]
+    total_products_purchased = cursor.fetchone()[0]
 
     # Total amount recouped from purchases
     cursor.execute("""
@@ -752,12 +760,39 @@ def dashboard_stats(
 
     total_purchases = cursor.fetchone()[0]
 
+    # Products purchased while close to expiry
+    # We define close to expiry as 3 days or less remaining.
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+
+    products_saved_from_waste = cursor.fetchone()[0]
+
+    # Calculate sustainability rate
+    if total_products_purchased > 0:
+
+        sustainability_rate = (
+            products_saved_from_waste
+            / total_products_purchased
+        ) * 100
+
+    else:
+
+        sustainability_rate = 0
+
     connection.close()
 
     return {
         "total_purchases": total_purchases,
-        "total_products_saved": total_products_saved,
-        "total_amount_recouped": round(total_amount_recouped, 2)
+        "total_products_purchased": total_products_purchased,
+        "products_saved_from_waste": products_saved_from_waste,
+        "sustainability_rate": round(sustainability_rate, 2),
+        "total_amount_recouped": round(
+            total_amount_recouped,
+            2
+        )
     }
 
 @app.delete("/products/{product_id}")

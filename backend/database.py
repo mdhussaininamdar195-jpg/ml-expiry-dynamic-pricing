@@ -138,10 +138,35 @@ def create_purchases_table():
 
                 purchased_at TEXT NOT NULL,
 
+                days_left_at_purchase INTEGER,
+                waste_risk_at_purchase TEXT,
+
                 FOREIGN KEY (product_id)
                 REFERENCES products(id)
             )
         """)
+
+        # Add new columns to an existing purchases table
+        cursor.execute("PRAGMA table_info(purchases)")
+
+        existing_columns = {
+            row["name"]
+            for row in cursor.fetchall()
+        }
+
+        if "days_left_at_purchase" not in existing_columns:
+
+            cursor.execute("""
+                ALTER TABLE purchases
+                ADD COLUMN days_left_at_purchase INTEGER
+            """)
+
+        if "waste_risk_at_purchase" not in existing_columns:
+
+            cursor.execute("""
+                ALTER TABLE purchases
+                ADD COLUMN waste_risk_at_purchase TEXT
+            """)
 
         connection.commit()
 
