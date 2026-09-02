@@ -102,8 +102,32 @@ def create_users_table():
 
                 hashed_password TEXT NOT NULL,
 
-                is_active INTEGER DEFAULT 1
+                is_active INTEGER DEFAULT 1,
+
+                role TEXT DEFAULT 'customer'
             )
+        """)
+
+        # Add role column to an existing users table
+        cursor.execute("PRAGMA table_info(users)")
+
+        existing_columns = {
+            row["name"]
+            for row in cursor.fetchall()
+        }
+
+        if "role" not in existing_columns:
+
+            cursor.execute("""
+                ALTER TABLE users
+                ADD COLUMN role TEXT DEFAULT 'customer'
+            """)
+
+        # Make the existing admin account an admin
+        cursor.execute("""
+            UPDATE users
+            SET role = 'admin'
+            WHERE username = 'admin'
         """)
 
         connection.commit()
