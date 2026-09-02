@@ -1,63 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./CustomerHome.css";
+import { apiRequest } from "../services/api";
 
-const categories = ["All", "Dairy", "Bakery", "Produce", "Beverages"];
-
-const products = [
-  {
-    id: 1,
-    name: "Fresh Milk",
-    category: "Dairy",
-    size: "1 L",
-    price: 48,
-    originalPrice: 60,
-    status: "Near expiry",
-  },
-  {
-    id: 2,
-    name: "Whole Wheat Bread",
-    category: "Bakery",
-    size: "400 g",
-    price: 32,
-    originalPrice: 40,
-    status: "Near expiry",
-  },
-  {
-    id: 3,
-    name: "Plain Yogurt",
-    category: "Dairy",
-    size: "400 g",
-    price: 35,
-    originalPrice: 50,
-    status: "Reduced price",
-  },
-  {
-    id: 4,
-    name: "Red Apples",
-    category: "Produce",
-    size: "1 kg",
-    price: 110,
-    originalPrice: 125,
-    status: "Fresh",
-  },
-  {
-    id: 5,
-    name: "Orange Juice",
-    category: "Beverages",
-    size: "1 L",
-    price: 85,
-    originalPrice: 95,
-    status: "Fresh",
-  },
-  {
-    id: 6,
-    name: "Cheddar Cheese",
-    category: "Dairy",
-    size: "200 g",
-    price: 75,
-    originalPrice: 90,
-    status: "Reduced price",
-  },
+const categories = [
+  { label: "All", value: "All" },
+  { label: "Dairy", value: "Dairy" },
+  { label: "Bakery", value: "Bakery" },
+  { label: "Fruits", value: "Fruits" },
+  { label: "Vegetables", value: "Vegetables" },
+  { label: "Beverages", value: "Beverages" },
+  { label: "Snacks", value: "Snacks" },
+  { label: "Ready to Eat", value: "Ready_to_Eat" },
+  { label: "Meat", value: "Meat" },
+  { label: "Seafood", value: "Seafood" },
+  { label: "Deli", value: "Deli" },
+  { label: "Frozen Meals", value: "Frozen_Meals" },
+  { label: "Personal Care", value: "Personal_Care" },
 ];
 
 function ProductIcon({ category }) {
@@ -69,6 +27,7 @@ function ProductIcon({ category }) {
         <path d="M8 11h8" />
       </>
     ),
+
     Bakery: (
       <>
         <path d="M5 10h14v9H5z" />
@@ -76,18 +35,81 @@ function ProductIcon({ category }) {
         <path d="M9 14h6" />
       </>
     ),
-    Produce: (
+
+    Fruits: (
       <>
         <path d="M12 20c-4-2-6-5-5-9 4-.5 7 2 5 9Z" />
         <path d="M12 20c4-2 6-5 5-9-4-.5-7 2-5 9Z" />
         <path d="M12 11c0-3 2-5 5-6" />
       </>
     ),
+
+    Vegetables: (
+      <>
+        <path d="M12 20c-4-2-6-5-5-9 4-.5 7 2 5 9Z" />
+        <path d="M12 20c4-2 6-5 5-9-4-.5-7 2-5 9Z" />
+        <path d="M12 11c0-3 2-5 5-6" />
+      </>
+    ),
+
     Beverages: (
       <>
         <path d="M8 4h8" />
         <path d="M9 4l1 16h4l1-16" />
         <path d="M10 9h4" />
+      </>
+    ),
+
+    Snacks: (
+      <>
+        <path d="M7 5h10l-1 14H8L7 5Z" />
+        <path d="M9 5V3h6v2" />
+        <path d="M9 10h6" />
+      </>
+    ),
+
+    Ready_to_Eat: (
+      <>
+        <path d="M5 8h14v11H5z" />
+        <path d="M8 8V5h8v3" />
+        <path d="M8 12h8" />
+      </>
+    ),
+
+    Meat: (
+      <>
+        <path d="M6 14c0-4 3-7 7-7 3 0 5 2 5 5 0 4-3 7-7 7-3 0-5-2-5-5Z" />
+        <circle cx="15.5" cy="12" r="1" />
+      </>
+    ),
+
+    Seafood: (
+      <>
+        <path d="M4 12c3-5 9-6 16-2-2 5-7 7-12 5l-4 2 2-5-2-0Z" />
+        <circle cx="16" cy="11" r="1" />
+      </>
+    ),
+
+    Deli: (
+      <>
+        <path d="M5 8h14v11H5z" />
+        <path d="M8 8V5h8v3" />
+        <path d="M8 12h8" />
+      </>
+    ),
+
+    Frozen_Meals: (
+      <>
+        <path d="M6 6h12v13H6z" />
+        <path d="M9 10h6" />
+        <path d="M9 14h6" />
+      </>
+    ),
+
+    Personal_Care: (
+      <>
+        <path d="M9 4h6" />
+        <path d="M10 4v4l-2 3v8h8v-8l-2-3V4" />
       </>
     ),
   };
@@ -102,7 +124,12 @@ function ProductIcon({ category }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {icons[category]}
+      {icons[category] || (
+        <>
+          <rect x="6" y="6" width="12" height="13" rx="2" />
+          <path d="M9 10h6M9 14h6" />
+        </>
+      )}
     </svg>
   );
 }
@@ -160,9 +187,49 @@ function CustomerHome() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState([]);
+  const [products, setProducts] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [purchaseComplete, setPurchaseComplete] = useState(false);
   const [lastPurchaseTotal, setLastPurchaseTotal] = useState(0);
+
+  useEffect(() => {
+    async function loadProducts() {
+      try {
+        const data = await apiRequest("/products?limit=100");
+
+        const mappedProducts = data.map((product) => {
+          const finalPrice = Number(
+            product.final_price ?? product.selling_price
+          );
+
+          const originalPrice = Number(product.selling_price);
+
+          const recommendedDiscount = Number(
+            product.recommended_discount ?? 0
+          );
+
+          const isDiscounted =
+            recommendedDiscount > 0 && finalPrice < originalPrice;
+
+          return {
+            id: product.id,
+            name: product.product_name,
+            category: product.category,
+            price: finalPrice,
+            originalPrice,
+            recommendedDiscount,
+            isDiscounted,
+          };
+        });
+
+        setProducts(mappedProducts);
+      } catch (error) {
+        console.error("Failed to load customer products:", error);
+      }
+    }
+
+    loadProducts();
+  }, []);
 
   const filteredProducts = products.filter((product) => {
     const matchesCategory =
@@ -218,7 +285,11 @@ function CustomerHome() {
       <header className="customer-header">
         <div className="customer-brand">
           <div className="customer-brand-mark">
-            <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <svg
+              viewBox="0 0 32 32"
+              fill="none"
+              aria-hidden="true"
+            >
               <path
                 d="M16 4c-5.8 2.2-9 6.1-9 11.3C7 21.2 10.8 26 16 28c5.2-2 9-6.8 9-12.7C25 10.1 21.8 6.2 16 4Z"
                 fill="currentColor"
@@ -298,8 +369,8 @@ function CustomerHome() {
             <h1>Good groceries, better value.</h1>
 
             <p>
-              Browse nearby products with prices adjusted to help reduce
-              unnecessary food waste.
+              Browse nearby products with prices adjusted to help
+              reduce unnecessary food waste.
             </p>
           </div>
         </section>
@@ -332,13 +403,17 @@ function CustomerHome() {
           <div className="category-list">
             {categories.map((category) => (
               <button
-                key={category}
+                key={category.value}
                 className={`category-button ${
-                  selectedCategory === category ? "selected" : ""
+                  selectedCategory === category.value
+                    ? "selected"
+                    : ""
                 }`}
-                onClick={() => setSelectedCategory(category)}
+                onClick={() =>
+                  setSelectedCategory(category.value)
+                }
               >
-                {category}
+                {category.label}
               </button>
             ))}
           </div>
@@ -355,7 +430,10 @@ function CustomerHome() {
             </div>
 
             <span className="product-count">
-              {filteredProducts.length} products
+              {filteredProducts.length}{" "}
+              {filteredProducts.length === 1
+                ? "product"
+                : "products"}
             </span>
           </div>
 
@@ -364,6 +442,20 @@ function CustomerHome() {
               const isAdded = cartItems.some(
                 (item) => item.id === product.id
               );
+
+              const statusClass =
+                product.recommendedDiscount > 50
+                  ? "strong-deal"
+                  : product.recommendedDiscount <= 15
+                    ? "small-saving"
+                    : "reduced";
+
+              const statusText =
+                product.recommendedDiscount > 50
+                  ? "Great deal"
+                  : product.recommendedDiscount <= 15
+                    ? "Small saving"
+                    : "Reduced price";
 
               return (
                 <article
@@ -376,28 +468,44 @@ function CustomerHome() {
 
                   <div className="customer-product-content">
                     <div className="product-meta">
-                      <span>{product.category}</span>
-                      <span>{product.size}</span>
+                      <span>
+                        {product.category.replaceAll("_", " ")}
+                      </span>
                     </div>
 
                     <h3>{product.name}</h3>
 
-                    <span
-                      className={`product-status ${
-                        product.status === "Near expiry"
-                          ? "attention"
-                          : product.status === "Reduced price"
-                            ? "reduced"
-                            : ""
-                      }`}
-                    >
-                      {product.status}
-                    </span>
+                    {product.isDiscounted && (
+                      <span
+                        className={`product-status ${statusClass}`}
+                      >
+                        {statusText}
+                      </span>
+                    )}
 
                     <div className="product-purchase-row">
-                      <div className="product-price">
-                        <strong>₹{product.price}</strong>
-                        <del>₹{product.originalPrice}</del>
+                      <div>
+                        <div className="product-price">
+                          <strong>
+                            ₹{Number(product.price).toFixed(2)}
+                          </strong>
+
+                          {product.isDiscounted && (
+                            <del>
+                              ₹
+                              {Number(product.originalPrice).toFixed(
+                                2
+                              )}
+                            </del>
+                          )}
+                        </div>
+
+                        {product.isDiscounted && (
+                          <div className="product-discount">
+                            {product.recommendedDiscount.toFixed(2)}%
+                            off
+                          </div>
+                        )}
                       </div>
 
                       <button
@@ -419,6 +527,7 @@ function CustomerHome() {
           {filteredProducts.length === 0 && (
             <div className="empty-products">
               <strong>No products found</strong>
+
               <span>
                 Try a different search or category.
               </span>
@@ -465,7 +574,8 @@ function CustomerHome() {
                 <strong>Your cart is empty</strong>
 
                 <span>
-                  Add products from the catalogue to see them here.
+                  Add products from the catalogue to see them
+                  here.
                 </span>
               </div>
             ) : (
@@ -486,12 +596,12 @@ function CustomerHome() {
                         <strong>{product.name}</strong>
 
                         <span>
-                          {product.size} · {product.category}
+                          {product.category.replaceAll("_", " ")}
                         </span>
 
                         <div className="cart-item-bottom">
                           <span className="cart-item-price">
-                            ₹{product.price}
+                            ₹{Number(product.price).toFixed(2)}
                           </span>
 
                           <button
@@ -512,7 +622,10 @@ function CustomerHome() {
                 <div className="cart-footer">
                   <div className="cart-subtotal">
                     <span>Subtotal</span>
-                    <strong>₹{cartTotal}</strong>
+
+                    <strong>
+                      ₹{Number(cartTotal).toFixed(2)}
+                    </strong>
                   </div>
 
                   <span className="cart-note">
@@ -552,7 +665,10 @@ function CustomerHome() {
 
             <div className="purchase-success-summary">
               <span>Total paid</span>
-              <strong>₹{lastPurchaseTotal}</strong>
+
+              <strong>
+                ₹{Number(lastPurchaseTotal).toFixed(2)}
+              </strong>
             </div>
 
             <button
