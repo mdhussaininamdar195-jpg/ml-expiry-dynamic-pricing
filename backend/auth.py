@@ -127,7 +127,7 @@ def get_current_user(
     cursor = connection.cursor()
 
     cursor.execute("""
-        SELECT id, username, email, is_active
+        SELECT id, username, email, is_active, role
         FROM users
         WHERE username = ?
     """, (
