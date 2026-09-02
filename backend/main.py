@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
@@ -29,6 +29,7 @@ from ml.src.predict import predict_price
 
 app = FastAPI()
 
+# Allow the React frontend running on Vite to call this API.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -77,8 +78,6 @@ class UserRegister(BaseModel):
     username: str
     email: str | None = None
     password: str
-
-
 # ============================================================
 # PURCHASE INPUT MODEL
 # ============================================================
@@ -132,15 +131,13 @@ def register_user(user: UserRegister):
         user.password
     )
 
-    # New users are customers by default
     cursor.execute("""
         INSERT INTO users (
             username,
             email,
-            hashed_password,
-            role
+            hashed_password
         )
-        VALUES (?, ?, ?, 'customer')
+        VALUES (?, ?, ?)
     """, (
         user.username,
         user.email,
@@ -237,13 +234,13 @@ def read_current_user(
 
 
 # ============================================================
-# PRODUCT + ML PREDICTION - ADMIN ONLY
+# PRODUCT + ML PREDICTION - PROTECTED
 # ============================================================
 
 @app.post("/predict")
 def predict_product(
     product: Product,
-    current_user: dict = Depends(get_current_admin)
+    current_user: dict = Depends(get_current_user)
 ):
 
     product_data = {
@@ -291,7 +288,7 @@ def predict_product(
 
 
 # ============================================================
-# CREATE PRODUCT + AUTOMATIC ML PREDICTION - ADMIN ONLY
+# CREATE PRODUCT + AUTOMATIC ML PREDICTION - PROTECTED
 # ============================================================
 
 @app.post("/products")
@@ -300,7 +297,7 @@ def create_product(
     current_user: dict = Depends(get_current_admin)
 ):
 
-    # 1. Prepare product data for ML prediction
+    # 1. Prepare product data for ML model
 
     product_data = {
 
@@ -347,9 +344,12 @@ def create_product(
             sales_velocity,
             days_left,
             expected_demand,
-            prediction
+            prediction,
+            waste_risk,
+            recommended_discount,
+            final_price
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         product.product_name,
         product.category,
@@ -362,7 +362,10 @@ def create_product(
         product.sales_velocity,
         product.days_left,
         product.expected_demand,
-        prediction_json
+        prediction_json,
+        prediction.get("waste_risk_category"),
+        prediction.get("recommended_discount"),
+        prediction.get("final_price")
     ))
 
     connection.commit()
@@ -379,46 +382,85 @@ def create_product(
 
 
 # ============================================================
-# GET ALL PRODUCTS - PUBLIC
+# GET PRODUCTS - PUBLIC, SERVER-SIDE PAGINATION
 # ============================================================
 
 @app.get("/products")
 def get_products(
-    limit: int = 20,
-    offset: int = 0
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str | None = None,
+    category: str | None = None,
+    risk: str | None = None
 ):
+    """Return one page of products from the shared database."""
 
     connection = get_connection()
     cursor = connection.cursor()
 
+    where_clauses = []
+    parameters = []
+
+    if search and search.strip():
+        where_clauses.append("LOWER(product_name) LIKE LOWER(?)")
+        parameters.append(f"%{search.strip()}%")
+
+    if category and category.lower() != "all":
+        where_clauses.append("LOWER(category) = LOWER(?)")
+        parameters.append(category.strip())
+
+    if risk and risk.lower() not in {"all", "all-risk"}:
+        where_clauses.append("LOWER(waste_risk) = LOWER(?)")
+        parameters.append(risk.replace("-risk", "").strip())
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
     cursor.execute(
-        "SELECT * FROM products LIMIT ? OFFSET ?",
-        (limit, offset)
+        f"SELECT COUNT(*) FROM products{where_sql}",
+        parameters
+    )
+    total = cursor.fetchone()[0]
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    offset = (page - 1) * page_size
+
+    cursor.execute(
+        f"""
+        SELECT *
+        FROM products
+        {where_sql}
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        parameters + [page_size, offset]
     )
 
     products = cursor.fetchall()
-
     connection.close()
 
     result = []
-
     for product in products:
-
         product_data = dict(product)
-
         if product_data["prediction"]:
-
             product_data["prediction"] = json.loads(
                 product_data["prediction"]
             )
-
         result.append(product_data)
 
-    return result
+    return {
+        "products": result,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 # ============================================================
-# SEARCH PRODUCTS - PUBLIC
+# SEARCH PRODUCTS - PROTECTED
 # ============================================================
 
 @app.get("/products/search")
@@ -426,7 +468,8 @@ def search_products(
     product_name: str | None = None,
     category: str | None = None,
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -485,12 +528,13 @@ def search_products(
 
 
 # ============================================================
-# GET PRODUCT BY ID - PUBLIC
+# GET PRODUCT BY ID - PROTECTED
 # ============================================================
 
 @app.get("/products/{product_id}")
 def get_product(
-    product_id: int
+    product_id: int,
+    current_user: dict = Depends(get_current_user)
 ):
 
     connection = get_connection()
@@ -524,7 +568,7 @@ def get_product(
 
 
 # ============================================================
-# UPDATE PRODUCT - ADMIN ONLY
+# UPDATE PRODUCT - PROTECTED
 # ============================================================
 
 @app.put("/products/{product_id}")
@@ -535,9 +579,7 @@ def update_product(
 ):
 
     # Prepare updated product data for ML prediction
-
     product_data = {
-
         "Product_Name": product.product_name,
         "Category": product.category,
 
@@ -557,11 +599,9 @@ def update_product(
     }
 
     # Recalculate prediction using updated values
-
     prediction = predict_price(product_data)
 
     # Convert prediction to JSON for SQLite
-
     prediction_json = json.dumps(prediction)
 
     connection = get_connection()
@@ -581,7 +621,10 @@ def update_product(
             sales_velocity = ?,
             days_left = ?,
             expected_demand = ?,
-            prediction = ?
+            prediction = ?,
+            waste_risk = ?,
+            recommended_discount = ?,
+            final_price = ?
         WHERE id = ?
     """, (
         product.product_name,
@@ -596,6 +639,9 @@ def update_product(
         product.days_left,
         product.expected_demand,
         prediction_json,
+        prediction.get("waste_risk_category"),
+        prediction.get("recommended_discount"),
+        prediction.get("final_price"),
         product_id
     ))
 
@@ -620,8 +666,259 @@ def update_product(
 
 
 # ============================================================
-# DELETE PRODUCT - ADMIN ONLY
+# DELETE PRODUCT - PROTECTED
 # ============================================================
+
+# ============================================================
+# PURCHASE PRODUCT - PROTECTED
+# ============================================================
+
+@app.post("/products/{product_id}/purchase")
+def purchase_product(
+    product_id: int,
+    purchase: PurchaseRequest,
+    current_user: dict = Depends(get_current_user)
+):
+
+    if purchase.quantity <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Quantity must be greater than 0"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        # Read the complete product because the ML model needs all features.
+        cursor.execute("""
+            SELECT
+                id,
+                product_name,
+                category,
+                stock_date,
+                expiry_date,
+                current_stock,
+                historical_sales,
+                selling_price,
+                demand_rate,
+                sales_velocity,
+                days_left,
+                expected_demand,
+                prediction,
+                waste_risk
+            FROM products
+            WHERE id = ?
+        """, (product_id,))
+
+        product = cursor.fetchone()
+
+        if product is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
+
+        if product["current_stock"] < purchase.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail="Not enough stock available"
+            )
+
+        # Charge the price currently shown to the customer.
+        current_price = float(product["selling_price"])
+
+        if product["prediction"]:
+            current_prediction = json.loads(product["prediction"])
+            current_price = float(
+                current_prediction.get(
+                    "final_price",
+                    current_price
+                )
+            )
+
+        current_price = round(current_price, 2)
+        total_amount = round(
+            current_price * purchase.quantity,
+            2
+        )
+
+        # Purchase reduces stock.
+        new_stock = product["current_stock"] - purchase.quantity
+
+        # Treat the purchase as new sales history for the next prediction.
+        new_historical_sales = (
+            product["historical_sales"] + purchase.quantity
+        )
+
+        # Recalculate the ML price using the new stock level.
+        ml_input = {
+            "Product_Name": product["product_name"],
+            "Category": product["category"],
+            "Stock_Date": product["stock_date"],
+            "Expiry_Date": product["expiry_date"],
+            "Current_Stock": new_stock,
+            "Historical_Sales": new_historical_sales,
+            "Selling_Price": product["selling_price"],
+            "Demand_Rate": product["demand_rate"],
+            "Sales_Velocity": product["sales_velocity"],
+            "Days_Left": product["days_left"],
+            "Expected_Demand": product["expected_demand"]
+        }
+
+        prediction = predict_price(ml_input)
+        prediction["recommended_discount"] = round(
+            float(prediction["recommended_discount"]),
+            2
+        )
+        prediction["final_price"] = round(
+            float(prediction["final_price"]),
+            2
+        )
+
+        prediction_json = json.dumps(prediction)
+
+        # Update inventory and the latest ML prediction together.
+        cursor.execute("""
+            UPDATE products
+            SET
+                current_stock = ?,
+                historical_sales = ?,
+                prediction = ?,
+                waste_risk = ?,
+                recommended_discount = ?,
+                final_price = ?
+            WHERE id = ?
+        """, (
+            new_stock,
+            new_historical_sales,
+            prediction_json,
+            prediction.get("waste_risk_category"),
+            prediction.get("recommended_discount"),
+            prediction.get("final_price"),
+            product_id
+        ))
+
+        # Record the completed purchase using the price actually paid.
+        cursor.execute("""
+            INSERT INTO purchases (
+                product_id,
+                quantity,
+                price_per_unit,
+                total_amount,
+                purchased_at,
+                days_left_at_purchase,
+                waste_risk_at_purchase
+            )
+            VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
+        """, (
+            product_id,
+            purchase.quantity,
+            current_price,
+            total_amount,
+            product["days_left"],
+            product["waste_risk"]
+        ))
+
+        connection.commit()
+        purchase_id = cursor.lastrowid
+
+        return {
+            "message": "Purchase successful",
+            "purchase_id": purchase_id,
+            "product_id": product_id,
+            "product_name": product["product_name"],
+            "quantity": purchase.quantity,
+            "price_per_unit": current_price,
+            "total_amount": total_amount,
+            "remaining_stock": new_stock,
+            "prediction": prediction
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
+# ============================================================
+# DASHBOARD STATISTICS - PROTECTED
+# ============================================================
+
+@app.get("/dashboard/stats")
+def dashboard_stats(
+    current_user: dict = Depends(get_current_admin)
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Total number of products purchased
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+    """)
+
+    total_products_purchased = cursor.fetchone()[0]
+
+    # Total amount recouped from purchases
+    cursor.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM purchases
+    """)
+
+    total_amount_recouped = cursor.fetchone()[0]
+
+    # Number of purchase transactions
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM purchases
+    """)
+
+    total_purchases = cursor.fetchone()[0]
+
+    # Products purchased while close to expiry
+    # We define close to expiry as 3 days or less remaining.
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+
+    products_saved_from_waste = cursor.fetchone()[0]
+
+    # Calculate sustainability rate
+    if total_products_purchased > 0:
+
+        sustainability_rate = (
+            products_saved_from_waste
+            / total_products_purchased
+        ) * 100
+
+    else:
+
+        sustainability_rate = 0
+
+    connection.close()
+
+    return {
+        "total_purchases": total_purchases,
+        "total_products_purchased": total_products_purchased,
+        "products_saved_from_waste": products_saved_from_waste,
+        "sustainability_rate": round(sustainability_rate, 2),
+        "total_amount_recouped": round(
+            total_amount_recouped,
+            2
+        )
+    }
 
 @app.delete("/products/{product_id}")
 def delete_product(
@@ -653,205 +950,6 @@ def delete_product(
     return {
         "message": "Product deleted successfully",
         "product_id": product_id
-    }
-
-
-# ============================================================
-# PURCHASE PRODUCT - PUBLIC
-# ============================================================
-
-@app.post("/products/{product_id}/purchase")
-def purchase_product(
-    product_id: int,
-    purchase: PurchaseRequest
-):
-
-    if purchase.quantity <= 0:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Quantity must be greater than 0"
-        )
-
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    # Get product
-
-    cursor.execute("""
-        SELECT id, product_name, current_stock, selling_price,
-               prediction, days_left, waste_risk
-        FROM products
-        WHERE id = ?
-    """, (product_id,))
-
-    product = cursor.fetchone()
-
-    if product is None:
-
-        connection.close()
-
-        raise HTTPException(
-            status_code=404,
-            detail="Product not found"
-        )
-
-    # Check stock
-
-    if product["current_stock"] < purchase.quantity:
-
-        connection.close()
-
-        raise HTTPException(
-            status_code=400,
-            detail="Not enough stock available"
-        )
-
-    # Determine actual selling price
-
-    price_per_unit = product["selling_price"]
-
-    if product["prediction"]:
-
-        prediction = json.loads(product["prediction"])
-
-        price_per_unit = prediction.get(
-            "final_price",
-            price_per_unit
-        )
-
-    total_amount = price_per_unit * purchase.quantity
-
-    # Reduce stock
-
-    new_stock = product["current_stock"] - purchase.quantity
-
-    cursor.execute("""
-        UPDATE products
-        SET current_stock = ?
-        WHERE id = ?
-    """, (
-        new_stock,
-        product_id
-    ))
-
-    # Record purchase
-
-    cursor.execute("""
-        INSERT INTO purchases (
-            product_id,
-            quantity,
-            price_per_unit,
-            total_amount,
-            purchased_at,
-            days_left_at_purchase,
-            waste_risk_at_purchase
-        )
-        VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
-    """, (
-        product_id,
-        purchase.quantity,
-        price_per_unit,
-        total_amount,
-        product["days_left"],
-        product["waste_risk"]
-    ))
-
-    connection.commit()
-
-    purchase_id = cursor.lastrowid
-
-    connection.close()
-
-    return {
-        "message": "Purchase successful",
-        "purchase_id": purchase_id,
-        "product_id": product_id,
-        "product_name": product["product_name"],
-        "quantity": purchase.quantity,
-        "price_per_unit": float(price_per_unit),
-        "total_amount": float(total_amount),
-        "remaining_stock": new_stock
-    }
-
-
-# ============================================================
-# DASHBOARD STATISTICS - ADMIN ONLY
-# ============================================================
-
-@app.get("/dashboard/stats")
-def dashboard_stats(
-    current_user: dict = Depends(get_current_admin)
-):
-
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    # Total number of products purchased
-
-    cursor.execute("""
-        SELECT COALESCE(SUM(quantity), 0)
-        FROM purchases
-    """)
-
-    total_products_purchased = cursor.fetchone()[0]
-
-    # Total amount recouped from purchases
-
-    cursor.execute("""
-        SELECT COALESCE(SUM(total_amount), 0)
-        FROM purchases
-    """)
-
-    total_amount_recouped = cursor.fetchone()[0]
-
-    # Number of purchase transactions
-
-    cursor.execute("""
-        SELECT COUNT(*)
-        FROM purchases
-    """)
-
-    total_purchases = cursor.fetchone()[0]
-
-    # Products purchased while close to expiry
-    # We define close to expiry as 3 days or less remaining.
-
-    cursor.execute("""
-        SELECT COALESCE(SUM(quantity), 0)
-        FROM purchases
-        WHERE days_left_at_purchase <= 3
-    """)
-
-    products_saved_from_waste = cursor.fetchone()[0]
-
-    # Calculate sustainability rate
-
-    if total_products_purchased > 0:
-
-        sustainability_rate = (
-            products_saved_from_waste
-            / total_products_purchased
-        ) * 100
-
-    else:
-
-        sustainability_rate = 0
-
-    connection.close()
-
-    return {
-        "total_purchases": total_purchases,
-        "total_products_purchased": total_products_purchased,
-        "products_saved_from_waste": products_saved_from_waste,
-        "sustainability_rate": round(
-            sustainability_rate,
-            2
-        ),
-        "total_amount_recouped": round(
-            total_amount_recouped,
-            2
-        )
     }
 
 

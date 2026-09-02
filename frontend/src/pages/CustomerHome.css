@@ -758,6 +758,68 @@
   border-color: var(--brand-dark);
 }
 
+
+/* =========================
+   PAGINATION
+   ========================= */
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 16px 0;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.pagination-button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+}
+
+.pagination-button.active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: white;
+}
+
+.pagination-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagination-arrow {
+  padding-inline: 12px;
+}
+
+.pagination-ellipsis {
+  min-width: 24px;
+  text-align: center;
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
 /* =========================
    RESPONSIVE
    ========================= */
@@ -816,5 +878,73 @@
 
   .purchase-success-card {
     padding: 24px;
+  }
+}
+/* =========================
+   PAGINATION
+   ========================= */
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-button {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.pagination-button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+}
+
+.pagination-button.active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: white;
+}
+
+.pagination-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.pagination-arrow {
+  min-width: 72px;
+}
+
+.pagination-ellipsis {
+  min-width: 20px;
+  text-align: center;
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .pagination-controls {
+    flex-wrap: wrap;
+  }
+
+  .pagination-pages {
+    order: 3;
+    width: 100%;
+    justify-content: center;
   }
 }

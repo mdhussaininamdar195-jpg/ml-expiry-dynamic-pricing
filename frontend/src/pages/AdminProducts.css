@@ -24,6 +24,7 @@
 }
 
 .admin-page-header p {
+  margin: 0;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -48,6 +49,7 @@
   color: white;
   font-size: 11px;
   font-weight: 650;
+  cursor: pointer;
 }
 
 .add-product-button:hover {
@@ -73,6 +75,7 @@
   align-items: center;
   gap: 9px;
   padding: 0 11px;
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -91,11 +94,21 @@
   outline: 0;
   background: transparent;
   color: var(--text);
+  font: inherit;
   font-size: 11px;
 }
 
 .admin-search input::placeholder {
   color: var(--text-subtle);
+}
+
+.clear-search-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .filter-select {
@@ -105,7 +118,9 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-muted);
+  font: inherit;
   font-size: 11px;
+  cursor: pointer;
 }
 
 .products-panel {
@@ -155,6 +170,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .products-table td {
@@ -177,7 +193,6 @@
 }
 
 .table-product-image {
-
   width: 36px;
   height: 36px;
   display: grid;
@@ -191,6 +206,7 @@
   font-size: 11px;
   font-weight: 700;
 }
+
 .table-product-image img {
   width: 100%;
   height: 100%;
@@ -244,28 +260,131 @@
   background: var(--success-soft);
 }
 
-.edit-product-button {
+.product-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.edit-product-button,
+.delete-product-button {
   height: 30px;
   padding: 0 9px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
+  font: inherit;
   font-size: 10px;
   font-weight: 650;
+  cursor: pointer;
 }
 
-.edit-product-button:hover {
+.edit-product-button {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.edit-product-button:hover:not(:disabled) {
   border-color: var(--brand);
   color: var(--brand-dark);
 }
 
-.edit-product-button svg {
+.delete-product-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--danger);
+}
+
+.delete-product-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.edit-product-button svg,
+.delete-product-button svg {
   width: 13px;
   height: 13px;
+  flex-shrink: 0;
+}
+
+.edit-product-button:disabled,
+.delete-product-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.no-products-cell {
+  height: 120px !important;
+  text-align: center;
+  color: var(--text-subtle) !important;
+}
+
+/* Pagination */
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pagination-button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+}
+
+.pagination-button.active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: white;
+}
+
+.pagination-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagination-arrow {
+  padding-inline: 12px;
+}
+
+.pagination-ellipsis {
+  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-subtle);
+  font-size: 10px;
 }
 
 @media (max-width: 700px) {
@@ -289,5 +408,24 @@
 
   .filter-select {
     width: 100%;
+  }
+
+  .product-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pagination-controls {
+    gap: 4px;
+    padding-inline: 10px;
+  }
+
+  .pagination-pages {
+    max-width: 190px;
+    overflow-x: auto;
+  }
+
+  .pagination-arrow {
+    padding-inline: 8px;
   }
 }

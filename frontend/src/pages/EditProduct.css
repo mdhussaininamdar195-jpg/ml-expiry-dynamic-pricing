@@ -1,4 +1,4 @@
-.edit-product-page {
+ .edit-product-page {
   min-height: 100vh;
   padding: 42px;
   background: var(--bg);
@@ -148,6 +148,13 @@
   border: 0;
 }
 
+.form-error {
+  margin-top: 16px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .image-upload-area {
   display: flex;
   align-items: center;
@@ -280,6 +287,13 @@
 
 .save-product-button:hover {
   background: var(--brand-dark);
+}
+
+.save-product-button:disabled,
+.cancel-button:disabled,
+.back-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 @media (max-width: 700px) {

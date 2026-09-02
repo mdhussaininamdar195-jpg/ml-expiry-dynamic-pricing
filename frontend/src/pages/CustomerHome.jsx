@@ -183,6 +183,25 @@ function CheckIcon() {
   );
 }
 
+function getPageNumbers(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = [1];
+  if (currentPage > 4) pages.push("...");
+
+  const start = Math.max(2, currentPage - 1);
+  const end = Math.min(totalPages - 1, currentPage + 1);
+  for (let page = start; page <= end; page += 1) {
+    if (!pages.includes(page)) pages.push(page);
+  }
+
+  if (currentPage < totalPages - 3) pages.push("...");
+  pages.push(totalPages);
+  return pages;
+}
+
 function CustomerHome() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
@@ -192,56 +211,97 @@ function CustomerHome() {
   const [purchaseComplete, setPurchaseComplete] = useState(false);
   const [lastPurchaseTotal, setLastPurchaseTotal] = useState(0);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [purchaseError, setPurchaseError] = useState("");
+  const [isPurchasing, setIsPurchasing] = useState(false);
+
+  const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const timer = setTimeout(() => setCurrentPage(1), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm, selectedCategory]);
+
   useEffect(() => {
     async function loadProducts() {
+      setLoading(true);
+      setLoadError("");
+
       try {
-        const data = await apiRequest("/products?limit=100");
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          page_size: String(PAGE_SIZE),
+        });
 
-        const mappedProducts = data.map((product) => {
+        if (searchTerm.trim()) params.set("search", searchTerm.trim());
+        if (selectedCategory !== "All") {
+          params.set("category", selectedCategory);
+        }
+
+        const data = await apiRequest(`/products?${params.toString()}`);
+        const pageProducts = Array.isArray(data) ? data : data.products ?? [];
+
+        const mappedProducts = pageProducts.map((product) => {
+          const prediction = product.prediction ?? {};
+          const daysLeft = Number(product.days_left ?? 0);
           const finalPrice = Number(
-            product.final_price ?? product.selling_price
+            prediction.final_price ??
+              product.final_price ??
+              product.selling_price ??
+              0
           );
-
-          const originalPrice = Number(product.selling_price);
-
+          const originalPrice = Number(product.selling_price ?? 0);
           const recommendedDiscount = Number(
-            product.recommended_discount ?? 0
+            prediction.recommended_discount ??
+              product.recommended_discount ??
+              0
           );
 
-          const isDiscounted =
-            recommendedDiscount > 0 && finalPrice < originalPrice;
+          let status = "";
+          if (recommendedDiscount > 50) status = "Great deal";
+          else if (recommendedDiscount >= 16) status = "Reduced price";
+          else if (recommendedDiscount > 0) status = "Small saving";
 
           return {
             id: product.id,
-            name: product.product_name,
-            category: product.category,
+            name: product.product_name ?? "",
+            category: product.category ?? "Unknown",
+            size: "",
             price: finalPrice,
             originalPrice,
             recommendedDiscount,
-            isDiscounted,
+            isDiscounted: recommendedDiscount > 0 && finalPrice < originalPrice,
+            status,
+            daysLeft,
+            stock: Number(product.current_stock ?? 0),
           };
         });
 
         setProducts(mappedProducts);
+        setTotalProducts(Number(data.total ?? pageProducts.length));
+        setTotalPages(Number(data.total_pages ?? 1));
+
+        if (data.page && data.page !== currentPage) {
+          setCurrentPage(Number(data.page));
+        }
       } catch (error) {
         console.error("Failed to load customer products:", error);
+        setLoadError(error.message || "Failed to load products.");
+        setProducts([]);
+      } finally {
+        setLoading(false);
       }
     }
 
     loadProducts();
-  }, []);
+  }, [currentPage, searchTerm, selectedCategory, refreshVersion]);
 
-  const filteredProducts = products.filter((product) => {
-    const matchesCategory =
-      selectedCategory === "All" ||
-      product.category === selectedCategory;
-
-    const matchesSearch = product.name
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-
-    return matchesCategory && matchesSearch;
-  });
+  const pageNumbers = getPageNumbers(currentPage, totalPages);
 
   function handleBuy(product) {
     setCartItems((currentItems) => {
@@ -259,20 +319,52 @@ function CustomerHome() {
     );
   }
 
-  function handlePurchase() {
-    if (cartItems.length === 0) {
+  async function handlePurchase() {
+    if (cartItems.length === 0 || isPurchasing) {
       return;
     }
 
-    const total = cartItems.reduce(
-      (sum, product) => sum + product.price,
-      0
-    );
+    setPurchaseError("");
+    setIsPurchasing(true);
 
-    setLastPurchaseTotal(total);
-    setCartItems([]);
-    setIsCartOpen(false);
-    setPurchaseComplete(true);
+    try {
+      const purchaseResults = [];
+
+      for (const product of cartItems) {
+        const response = await apiRequest(
+          `/products/${product.id}/purchase`,
+          {
+            method: "POST",
+            body: JSON.stringify({ quantity: 1 }),
+          }
+        );
+
+        purchaseResults.push(response);
+      }
+
+      const total = purchaseResults.reduce(
+        (sum, purchase) =>
+          sum + Number(purchase.total_amount ?? 0),
+        0
+      );
+
+      setLastPurchaseTotal(total);
+      setCartItems([]);
+      setIsCartOpen(false);
+      setPurchaseComplete(true);
+
+      // Reload the same page so stock and the newly recalculated
+      // ML price are visible immediately.
+      setRefreshVersion((current) => current + 1);
+    } catch (error) {
+      console.error("Failed to complete purchase:", error);
+      setPurchaseError(
+        error.message ||
+          "Purchase failed. Please try again."
+      );
+    } finally {
+      setIsPurchasing(false);
+    }
   }
 
   const cartTotal = cartItems.reduce(
@@ -430,32 +522,31 @@ function CustomerHome() {
             </div>
 
             <span className="product-count">
-              {filteredProducts.length}{" "}
-              {filteredProducts.length === 1
-                ? "product"
-                : "products"}
+              {totalProducts}{" "}
+              {totalProducts === 1 ? "product" : "products"}
             </span>
           </div>
 
-          <div className="customer-product-grid">
-            {filteredProducts.map((product) => {
+          {loading && (
+            <div className="empty-products">
+              <strong>Loading products...</strong>
+              <span>Please wait while the catalogue loads.</span>
+            </div>
+          )}
+
+          {!loading && loadError && (
+            <div className="empty-products">
+              <strong>Unable to load products</strong>
+              <span>{loadError}</span>
+            </div>
+          )}
+
+          {!loading && !loadError && (
+            <div className="customer-product-grid">
+              {products.map((product) => {
               const isAdded = cartItems.some(
                 (item) => item.id === product.id
               );
-
-              const statusClass =
-                product.recommendedDiscount > 50
-                  ? "strong-deal"
-                  : product.recommendedDiscount <= 15
-                    ? "small-saving"
-                    : "reduced";
-
-              const statusText =
-                product.recommendedDiscount > 50
-                  ? "Great deal"
-                  : product.recommendedDiscount <= 15
-                    ? "Small saving"
-                    : "Reduced price";
 
               return (
                 <article
@@ -471,40 +562,37 @@ function CustomerHome() {
                       <span>
                         {product.category.replaceAll("_", " ")}
                       </span>
+
                     </div>
 
                     <h3>{product.name}</h3>
 
-                    {product.isDiscounted && (
+                    {product.status && (
                       <span
-                        className={`product-status ${statusClass}`}
+                        className={`product-status ${
+                          product.status === "Reduced price"
+                            ? "reduced"
+                            : product.status === "Small saving"
+                              ? "small-saving"
+                              : product.status === "Great deal"
+                                ? "strong-deal"
+                                : ""
+                        }`}
                       >
-                        {statusText}
+                        {product.status}
                       </span>
                     )}
 
                     <div className="product-purchase-row">
-                      <div>
-                        <div className="product-price">
-                          <strong>
-                            ₹{Number(product.price).toFixed(2)}
-                          </strong>
-
-                          {product.isDiscounted && (
-                            <del>
-                              ₹
-                              {Number(product.originalPrice).toFixed(
-                                2
-                              )}
-                            </del>
-                          )}
-                        </div>
+                      <div className="product-price">
+                        <strong>
+                          ₹{Number(product.price).toFixed(2)}
+                        </strong>
 
                         {product.isDiscounted && (
-                          <div className="product-discount">
-                            {product.recommendedDiscount.toFixed(2)}%
-                            off
-                          </div>
+                          <del>
+                            ₹{Number(product.originalPrice).toFixed(2)}
+                          </del>
                         )}
                       </div>
 
@@ -521,18 +609,59 @@ function CustomerHome() {
                   </div>
                 </article>
               );
-            })}
-          </div>
-
-          {filteredProducts.length === 0 && (
-            <div className="empty-products">
-              <strong>No products found</strong>
-
-              <span>
-                Try a different search or category.
-              </span>
+              })}
             </div>
           )}
+
+          {!loading && !loadError && products.length === 0 && (
+            <div className="empty-products">
+              <strong>No products found</strong>
+              <span>Try a different search or category.</span>
+            </div>
+          )}
+
+          {totalProducts > 0 && (
+            <div className="pagination-controls">
+              <button
+                type="button"
+                className="pagination-button pagination-arrow"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={currentPage === 1 || loading}
+              >
+                Previous
+              </button>
+
+              <div className="pagination-pages">
+                {pageNumbers.map((page, index) =>
+                  page === "..." ? (
+                    <span key={`ellipsis-${index}`} className="pagination-ellipsis">
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={page}
+                      type="button"
+                      className={`pagination-button ${currentPage === page ? "active" : ""}`}
+                      onClick={() => setCurrentPage(page)}
+                      disabled={loading}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="pagination-button pagination-arrow"
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                disabled={currentPage === totalPages || loading}
+              >
+                Next
+              </button>
+            </div>
+          )}
+
         </section>
       </main>
 
@@ -632,12 +761,19 @@ function CustomerHome() {
                     Purchase is simulated for this project.
                   </span>
 
+                  {purchaseError && (
+                    <span className="cart-note">
+                      {purchaseError}
+                    </span>
+                  )}
+
                   <button
                     type="button"
                     className="purchase-button"
                     onClick={handlePurchase}
+                    disabled={isPurchasing}
                   >
-                    Purchase
+                    {isPurchasing ? "Processing..." : "Purchase"}
                   </button>
                 </div>
               </>
