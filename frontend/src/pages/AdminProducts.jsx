@@ -1,55 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./AdminProducts.css";
 import EditProduct from "./EditProduct";
 import AddProduct from "./AddProduct";
-
-const products = [
-  {
-    id: 1,
-    name: "Fresh Milk",
-    category: "Dairy",
-    price: 48,
-    stock: 32,
-    daysLeft: 1,
-    risk: "High",
-  },
-  {
-    id: 2,
-    name: "Whole Wheat Bread",
-    category: "Bakery",
-    price: 32,
-    stock: 18,
-    daysLeft: 2,
-    risk: "High",
-  },
-  {
-    id: 3,
-    name: "Plain Yogurt",
-    category: "Dairy",
-    price: 35,
-    stock: 14,
-    daysLeft: 3,
-    risk: "Medium",
-  },
-  {
-    id: 4,
-    name: "Red Apples",
-    category: "Produce",
-    price: 110,
-    stock: 42,
-    daysLeft: 7,
-    risk: "Low",
-  },
-  {
-    id: 5,
-    name: "Orange Juice",
-    category: "Beverages",
-    price: 85,
-    stock: 26,
-    daysLeft: 9,
-    risk: "Low",
-  },
-];
+import { apiRequest } from "../services/api";
 
 function SearchIcon() {
   return (
@@ -102,11 +55,35 @@ function EditIcon() {
 function AdminProducts() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [addingProduct, setAddingProduct] = useState(false);
-  const [productList, setProductList] = useState(products);
+  const [productList, setProductList] = useState([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedRisk, setSelectedRisk] = useState("all-risk");
+
+  useEffect(() => {
+    async function loadProducts() {
+      try {
+        const data = await apiRequest("/products");
+
+        const mappedProducts = data.map((product) => ({
+          id: product.id,
+          name: product.product_name,
+          category: product.category,
+          price: product.selling_price,
+          stock: product.current_stock,
+          daysLeft: product.days_left,
+          risk: product.waste_risk || "Unknown",
+        }));
+
+        setProductList(mappedProducts);
+      } catch (error) {
+        console.error("Failed to load products:", error);
+      }
+    }
+
+    loadProducts();
+  }, []);
 
   if (addingProduct) {
     return (
