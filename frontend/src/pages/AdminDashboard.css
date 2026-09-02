@@ -452,3 +452,143 @@
         grid-template-columns: 1fr;
     }
 }
+
+
+/* ============================================================
+   Dashboard charts + PDF report
+   Add this block to the bottom of AdminDashboard.css
+   ============================================================ */
+
+.dashboard-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.dashboard-report-button {
+    border: 1px solid #d7ded9;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #163b2b;
+    padding: 11px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.dashboard-report-button:hover:not(:disabled) {
+    background: #f4f8f5;
+    border-color: #b9c9bf;
+}
+
+.dashboard-report-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.dashboard-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    margin-top: 24px;
+}
+
+.dashboard-chart-card {
+    min-width: 0;
+}
+
+.chart-period {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid #d7ded9;
+    border-radius: 999px;
+    color: #587064;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.dashboard-chart {
+    width: 100%;
+    margin-top: 10px;
+    overflow: hidden;
+}
+
+.dashboard-chart svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.chart-axis {
+    stroke: #b9c5be;
+    stroke-width: 1;
+}
+
+.chart-grid-line {
+    stroke: #e6ebe8;
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+}
+
+.chart-line {
+    stroke: #2f7655;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.chart-line.sustainability {
+    stroke: #567a67;
+}
+
+.chart-point {
+    fill: #ffffff;
+    stroke: #2f7655;
+    stroke-width: 2;
+}
+
+.chart-label,
+.chart-value-label {
+    fill: #6b7c73;
+    font-size: 11px;
+}
+
+.chart-value-label {
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.dashboard-chart-empty {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #7a8982;
+    font-size: 14px;
+}
+
+@media (max-width: 900px) {
+    .dashboard-chart-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-header-actions {
+        align-items: flex-end;
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboard-header-actions {
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .dashboard-report-button {
+        width: 100%;
+    }
+}

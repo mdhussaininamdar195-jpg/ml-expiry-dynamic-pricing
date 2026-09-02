@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
+from io import BytesIO
+from datetime import datetime, timedelta
 
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -21,6 +24,14 @@ from backend.auth import (
 )
 
 from ml.src.predict import predict_price
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.charts.lineplots import LinePlot
 
 
 # ============================================================
@@ -670,14 +681,13 @@ def update_product(
 # ============================================================
 
 # ============================================================
-# PURCHASE PRODUCT - PROTECTED
+# PURCHASE PRODUCT - PUBLIC CUSTOMER CHECKOUT
 # ============================================================
 
 @app.post("/products/{product_id}/purchase")
 def purchase_product(
     product_id: int,
-    purchase: PurchaseRequest,
-    current_user: dict = Depends(get_current_user)
+    purchase: PurchaseRequest
 ):
 
     if purchase.quantity <= 0:
@@ -810,7 +820,7 @@ def purchase_product(
                 days_left_at_purchase,
                 waste_risk_at_purchase
             )
-            VALUES (?, ?, ?, ?, datetime('now'), ?, ?)
+            VALUES (?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
         """, (
             product_id,
             purchase.quantity,
@@ -885,7 +895,7 @@ def dashboard_stats(
 
     total_purchases = cursor.fetchone()[0]
 
-    # Products purchased while close to expiry
+    # Products purchased while close to expiry.
     # We define close to expiry as 3 days or less remaining.
     cursor.execute("""
         SELECT COALESCE(SUM(quantity), 0)
@@ -894,6 +904,16 @@ def dashboard_stats(
     """)
 
     products_saved_from_waste = cursor.fetchone()[0]
+
+    # Revenue recovered from products that were close to expiry.
+    # This is intentionally different from total purchase revenue.
+    cursor.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+
+    amount_recouped_from_waste = cursor.fetchone()[0]
 
     # Calculate sustainability rate
     if total_products_purchased > 0:
@@ -913,12 +933,289 @@ def dashboard_stats(
         "total_purchases": total_purchases,
         "total_products_purchased": total_products_purchased,
         "products_saved_from_waste": products_saved_from_waste,
+        "amount_recouped_from_waste": round(
+            float(amount_recouped_from_waste or 0),
+            2
+        ),
         "sustainability_rate": round(sustainability_rate, 2),
         "total_amount_recouped": round(
             total_amount_recouped,
             2
         )
     }
+
+# ============================================================
+# DASHBOARD CHART DATA - PROTECTED
+# ============================================================
+
+@app.get("/dashboard/chart-data")
+def dashboard_chart_data(
+    current_user: dict = Depends(get_current_admin)
+):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    # Use the backend machine's local calendar date so a purchase made
+    # shortly after midnight is shown under the correct local day.
+    # Use the backend machine's local calendar date so a purchase made
+    # shortly after midnight is shown under the correct local day.
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=13)
+
+    cursor.execute("""
+        SELECT
+            DATE(purchased_at, 'localtime') AS purchase_date,
+            COALESCE(SUM(total_amount), 0),
+            COALESCE(SUM(quantity), 0),
+            COALESCE(SUM(
+                CASE
+                    WHEN days_left_at_purchase <= 3 THEN quantity
+                    ELSE 0
+                END
+            ), 0)
+        FROM purchases
+        WHERE DATE(purchased_at, 'localtime') BETWEEN ? AND ?
+        GROUP BY DATE(purchased_at, 'localtime')
+        ORDER BY DATE(purchased_at, 'localtime')
+    """, (start_date.isoformat(), end_date.isoformat()))
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    by_date = {
+        row[0]: {
+            "revenue": float(row[1] or 0),
+            "units": int(row[2] or 0),
+            "saved_units": int(row[3] or 0),
+        }
+        for row in rows
+    }
+
+    days = []
+    revenue = []
+    cumulative_revenue = []
+    sustainability_rate = []
+    saved_units = []
+    running_revenue = 0.0
+
+    for offset in range(14):
+        current_date = start_date + timedelta(days=offset)
+        row = by_date.get(current_date.isoformat(), {
+            "revenue": 0.0,
+            "units": 0,
+            "saved_units": 0,
+        })
+
+        running_revenue += row["revenue"]
+        rate = (
+            row["saved_units"] / row["units"] * 100
+            if row["units"] > 0 else 0
+        )
+
+        days.append(current_date.strftime("%d %b"))
+        revenue.append(round(row["revenue"], 2))
+        cumulative_revenue.append(round(running_revenue, 2))
+        sustainability_rate.append(round(rate, 2))
+        saved_units.append(row["saved_units"])
+
+    return {
+        "days": days,
+        "revenue": revenue,
+        "cumulative_revenue": cumulative_revenue,
+        "sustainability_rate": sustainability_rate,
+        "saved_units": saved_units,
+    }
+
+
+# ============================================================
+# DASHBOARD PDF REPORT - PROTECTED
+# ============================================================
+
+@app.get("/dashboard/report/pdf")
+def dashboard_report_pdf(
+    current_user: dict = Depends(get_current_admin)
+):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM purchases")
+    total_purchases = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COALESCE(SUM(quantity), 0) FROM purchases")
+    total_products_purchased = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COALESCE(SUM(total_amount), 0) FROM purchases")
+    total_amount_recouped = float(cursor.fetchone()[0] or 0)
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+    products_saved_from_waste = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM purchases
+        WHERE days_left_at_purchase <= 3
+    """)
+    amount_recouped_from_waste = float(cursor.fetchone()[0] or 0)
+
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=13)
+
+    cursor.execute("""
+        SELECT
+            DATE(purchased_at, 'localtime'),
+            COALESCE(SUM(total_amount), 0),
+            COALESCE(SUM(quantity), 0),
+            COALESCE(SUM(
+                CASE
+                    WHEN days_left_at_purchase <= 3 THEN quantity
+                    ELSE 0
+                END
+            ), 0)
+        FROM purchases
+        WHERE DATE(purchased_at, 'localtime') BETWEEN ? AND ?
+        GROUP BY DATE(purchased_at, 'localtime')
+        ORDER BY DATE(purchased_at, 'localtime')
+    """, (start_date.isoformat(), end_date.isoformat()))
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    by_date = {
+        row[0]: {
+            "revenue": float(row[1] or 0),
+            "units": int(row[2] or 0),
+            "saved_units": int(row[3] or 0),
+        }
+        for row in rows
+    }
+
+    sustainability_rate = (
+        products_saved_from_waste / total_products_purchased * 100
+        if total_products_purchased > 0 else 0
+    )
+
+    report_rows = [["Date", "Revenue", "Units", "Saved", "Sustainability"]]
+    revenue_points = []
+    sustainability_points = []
+    cumulative = 0.0
+
+    for offset in range(14):
+        current_date = start_date + timedelta(days=offset)
+        row = by_date.get(current_date.isoformat(), {
+            "revenue": 0.0,
+            "units": 0,
+            "saved_units": 0,
+        })
+        cumulative += row["revenue"]
+        rate = row["saved_units"] / row["units"] * 100 if row["units"] else 0
+        label = current_date.strftime("%d %b")
+
+        report_rows.append([
+            label,
+            f"Rs. {row['revenue']:,.2f}",
+            str(row["units"]),
+            str(row["saved_units"]),
+            f"{rate:.2f}%",
+        ])
+        revenue_points.append((offset + 1, cumulative))
+        sustainability_points.append((offset + 1, rate))
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DashboardTitle",
+        parent=styles["Title"],
+        fontSize=20,
+        spaceAfter=8,
+    )
+
+    story = [
+        Paragraph("FreshFlow Dashboard Report", title_style),
+        Paragraph(
+            f"Generated on {datetime.now().strftime('%d %b %Y, %H:%M')}",
+            styles["Normal"],
+        ),
+        Spacer(1, 10),
+    ]
+
+    summary = [
+        ["Metric", "Value"],
+        ["Total purchases", str(total_purchases)],
+        ["Total products purchased", str(total_products_purchased)],
+        ["Total purchase amount", f"Rs. {total_amount_recouped:,.2f}"],
+        ["Products saved from waste", str(products_saved_from_waste)],
+        ["Amount recouped from near-expiry products", f"Rs. {amount_recouped_from_waste:,.2f}"],
+        ["Sustainability rate", f"{sustainability_rate:.2f}%"],
+    ]
+
+    summary_table = Table(summary, colWidths=[95 * mm, 75 * mm])
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eaf2ed")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8d2")),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story += [summary_table, Spacer(1, 14)]
+
+    def make_chart(points, y_max, title):
+        drawing = Drawing(500, 220)
+        drawing.add(String(250, 205, title, textAnchor="middle", fontSize=12))
+        plot = LinePlot()
+        plot.x = 45
+        plot.y = 25
+        plot.width = 430
+        plot.height = 160
+        plot.data = [points]
+        plot.xValueAxis.valueMin = 1
+        plot.xValueAxis.valueMax = 14
+        plot.yValueAxis.valueMin = 0
+        plot.yValueAxis.valueMax = max(y_max, 1)
+        drawing.add(plot)
+        return drawing
+
+    max_revenue = max([p[1] for p in revenue_points] or [1])
+    story.append(make_chart(revenue_points, max_revenue, "Cumulative Revenue - Last 14 Days"))
+    story.append(Spacer(1, 10))
+    story.append(make_chart(sustainability_points, 100, "Daily Sustainability Rate - Last 14 Days"))
+    story.append(Spacer(1, 10))
+
+    daily_table = Table(report_rows, repeatRows=1, colWidths=[30*mm, 38*mm, 25*mm, 25*mm, 42*mm])
+    daily_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eaf2ed")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cfd8d2")),
+        ("PADDING", (0, 0), (-1, -1), 5),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+    story += [
+        Paragraph("14-Day Daily Breakdown", styles["Heading2"]),
+        daily_table,
+    ]
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=freshflow_dashboard_report.pdf"
+        },
+    )
+
 
 @app.delete("/products/{product_id}")
 def delete_product(

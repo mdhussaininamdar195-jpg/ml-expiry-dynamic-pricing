@@ -304,6 +304,9 @@ function CustomerHome() {
   const pageNumbers = getPageNumbers(currentPage, totalPages);
 
   function handleBuy(product) {
+    if (Number(product.stock ?? 0) <= 0) {
+      return;
+    }
     setCartItems((currentItems) => {
       if (currentItems.some((item) => item.id === product.id)) {
         return currentItems;
@@ -601,9 +604,13 @@ function CustomerHome() {
                           isAdded ? "added" : ""
                         }`}
                         onClick={() => handleBuy(product)}
-                        disabled={isAdded}
+                        disabled={isAdded || Number(product.stock ?? 0) <= 0}
                       >
-                        {isAdded ? "Added" : "Buy"}
+                        {isAdded
+                          ? "Added"
+                          : Number(product.stock ?? 0) <= 0
+                            ? "Out of stock"
+                            : "Buy"}
                       </button>
                     </div>
                   </div>
@@ -756,10 +763,6 @@ function CustomerHome() {
                       ₹{Number(cartTotal).toFixed(2)}
                     </strong>
                   </div>
-
-                  <span className="cart-note">
-                    Purchase is simulated for this project.
-                  </span>
 
                   {purchaseError && (
                     <span className="cart-note">
