@@ -17,8 +17,11 @@ import AdminRoute from "./components/AdminRoute";
 function AdminNavigation() {
   const location = useLocation();
 
-  // Only show admin navigation on admin pages
-  if (!location.pathname.startsWith("/admin")) {
+  // Do not show admin navigation on the login page.
+  if (
+    !location.pathname.startsWith("/admin") ||
+    location.pathname === "/admin/login"
+  ) {
     return null;
   }
 
@@ -27,7 +30,9 @@ function AdminNavigation() {
       <div className="admin-navigation-inner">
         <div className="admin-navigation-brand">
           <span className="admin-navigation-title">FreshFlow</span>
-          <span className="admin-navigation-label">Administration</span>
+          <span className="admin-navigation-label">
+            Administration
+          </span>
         </div>
 
         <div className="admin-navigation-links">
@@ -50,7 +55,10 @@ function AdminNavigation() {
             Products
           </NavLink>
 
-          <NavLink to="/" className="admin-nav-link customer-link">
+          <NavLink
+            to="/"
+            className="admin-nav-link customer-link"
+          >
             Customer Store
           </NavLink>
         </div>
@@ -65,13 +73,19 @@ function App() {
       <AdminNavigation />
 
       <Routes>
-        {/* Customer */}
-        <Route path="/" element={<CustomerHome />} />
+        {/* Customer Store */}
+        <Route
+          path="/"
+          element={<CustomerHome />}
+        />
 
-        {/* Admin Login */}
-        <Route path="/admin/login" element={<AdminLogin />} />
+        {/* Admin Login - Public */}
+        <Route
+          path="/admin/login"
+          element={<AdminLogin />}
+        />
 
-        {/* Protected Admin Routes */}
+        {/* Protected Admin Dashboard */}
         <Route
           path="/admin"
           element={
@@ -81,6 +95,7 @@ function App() {
           }
         />
 
+        {/* Protected Admin Products */}
         <Route
           path="/admin/products"
           element={
@@ -91,7 +106,10 @@ function App() {
         />
 
         {/* Unknown URL */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="*"
+          element={<Navigate to="/" replace />}
+        />
       </Routes>
     </BrowserRouter>
   );
