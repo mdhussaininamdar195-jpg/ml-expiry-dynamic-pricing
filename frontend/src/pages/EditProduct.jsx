@@ -18,23 +18,6 @@ const BASE_CATEGORIES = [
   "Produce",
 ];
 
-function ImageIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <circle cx="8.5" cy="9" r="1.5" />
-      <path d="m4 17 5-5 3.5 3.5 2.5-2.5 5 5" />
-    </svg>
-  );
-}
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -82,9 +65,13 @@ function EditProduct({ product, onBack, onSave }) {
     expectedDemand: String(product?.expectedDemand ?? ""),
   });
 
-  const [imagePreview, setImagePreview] = useState(
-    product?.imageData || product?.imagePreview || null
-  );
+  const initialImages = Array.isArray(product?.images)
+    ? product.images.filter(Boolean).slice(0, 3)
+    : product?.imageData || product?.imagePreview
+      ? [product.imageData || product.imagePreview]
+      : [];
+
+  const [imagePreviews, setImagePreviews] = useState(initialImages);
   const [imageInputKey, setImageInputKey] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -103,33 +90,43 @@ function EditProduct({ product, onBack, onSave }) {
   }
 
   async function handleImageChange(event) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
 
-    if (!file) {
+    const remainingSlots = 3 - imagePreviews.length;
+    if (remainingSlots <= 0) {
+      setError("You can add up to 3 product images.");
+      setImageInputKey((current) => current + 1);
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError("Image must be 2 MB or smaller.");
+    const selectedFiles = files.slice(0, remainingSlots);
+    if (selectedFiles.some((file) => file.size > 2 * 1024 * 1024)) {
+      setError("Each image must be 2 MB or smaller.");
       setImageInputKey((current) => current + 1);
       return;
     }
 
     try {
-      const imageData = await fileToDataUrl(file);
-      setImagePreview(imageData);
-
-      if (error) {
-        setError("");
-      }
+      const imageData = await Promise.all(selectedFiles.map(fileToDataUrl));
+      setImagePreviews((current) => [...current, ...imageData].slice(0, 3));
+      setError("");
     } catch (err) {
-      setError(err.message || "Could not load the selected image.");
+      setError(err.message || "Could not load the selected image(s).");
+    } finally {
       setImageInputKey((current) => current + 1);
     }
   }
 
-  function handleRemoveImage() {
-    setImagePreview(null);
+  function handleRemoveImage(index) {
+    setImagePreviews((current) =>
+      current.filter((_, imageIndex) => imageIndex !== index)
+    );
+    setImageInputKey((current) => current + 1);
+  }
+
+  function handleRemoveAllImages() {
+    setImagePreviews([]);
     setImageInputKey((current) => current + 1);
   }
 
@@ -208,7 +205,8 @@ function EditProduct({ product, onBack, onSave }) {
         sales_velocity: salesVelocity,
         days_left: daysLeft,
         expected_demand: expectedDemand,
-        image_data: imagePreview || null,
+        image_data: imagePreviews[0] || null,
+        images: imagePreviews,
       };
 
       const response = await apiRequest(
@@ -252,7 +250,9 @@ function EditProduct({ product, onBack, onSave }) {
         demandRate,
         salesVelocity,
         expectedDemand,
-        imagePreview,
+        imagePreview: imagePreviews[0] || null,
+        imageData: imagePreviews[0] || null,
+        images: imagePreviews,
       };
 
       if (onSave) {
@@ -453,59 +453,82 @@ function EditProduct({ product, onBack, onSave }) {
           )}
         </section>
 
-        <section className="edit-section">
-          <div className="section-heading">
-            <h2>Product image</h2>
-            <p>
-              Add an image for customers to identify the product.
-            </p>
+        <section className="edit-section edit-image-section">
+          <div className="section-heading image-section-heading">
+            <div>
+              <h2>Product images</h2>
+              <p>Use up to 3 images. The first image is the main customer-facing image.</p>
+            </div>
+            <span className="image-count-pill">{imagePreviews.length}/3 images</span>
           </div>
 
-          <div className="image-upload-area">
-            <div className="image-preview">
-              {imagePreview ? (
-                <img
-                  src={imagePreview}
-                  alt="Product preview"
-                />
-              ) : (
-                <ImageIcon />
-              )}
+          <div className="image-upload-gallery-area">
+            <div className="image-slot-grid">
+              {[0, 1, 2].map((slotIndex) => {
+                const image = imagePreviews[slotIndex];
+                const label = slotIndex === 0 ? "Add main image" : "Add another image";
+                return (
+                  <div className={`image-slot ${image ? "has-image" : "empty"}`} key={slotIndex}>
+                    {image ? (
+                      <>
+                        <img src={image} alt={`Product image ${slotIndex + 1}`} />
+                        {slotIndex === 0 && <span className="image-slot-main">Main image</span>}
+                        <button
+                          type="button"
+                          className="image-slot-remove"
+                          onClick={() => handleRemoveImage(slotIndex)}
+                          disabled={isSaving}
+                          aria-label={`Remove product image ${slotIndex + 1}`}
+                        >
+                          ×
+                        </button>
+                      </>
+                    ) : (
+                      <label className="image-slot-add">
+                        <span className="image-slot-plus">+</span>
+                        <strong>{label}</strong>
+                        <small>Image {slotIndex + 1} of 3</small>
+                        <input
+                          key={`${imageInputKey}-${slotIndex}`}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={handleImageChange}
+                        />
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="image-upload-content">
-              <strong>Product image</strong>
-              <span>
-                 JPG, PNG or WebP, up to 2 MB. The saved image
-                will also appear on the customer product card.
-              </span>
-
-              <div className="image-actions">
-                <label className="upload-button">
-                  Choose image
+            <div className="image-gallery-help">
+              <span className="image-help-icon">▧</span>
+              <strong>Product gallery</strong>
+              <p>JPG, PNG or WebP, up to 2 MB each. Customers can slide through these images after opening the product.</p>
+              {imagePreviews.length < 3 && (
+                <label className="add-another-image-button">
+                  + Add another image
                   <input
-                    key={imageInputKey}
+                    key={`additional-${imageInputKey}`}
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     onChange={handleImageChange}
                   />
                 </label>
-
-                {imagePreview && (
-                  <button
-                    type="button"
-                    className="remove-image-button"
-                    onClick={handleRemoveImage}
-                    disabled={isSaving}
-                  >
-                    Remove image
-                  </button>
-                )}
-              </div>
+              )}
+              {imagePreviews.length > 0 && (
+                <button
+                  type="button"
+                  className="remove-all-images-button"
+                  onClick={handleRemoveAllImages}
+                  disabled={isSaving}
+                >
+                  Remove all images
+                </button>
+              )}
             </div>
           </div>
         </section>
-
         <div className="form-actions">
           <button
             type="button"

@@ -429,3 +429,37 @@
     padding-inline: 8px;
   }
 }
+
+/* Final product-management action visibility */
+.products-table th:last-child,
+.products-table td:last-child {
+  min-width: 150px;
+  width: 150px;
+}
+
+.product-row-actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  white-space: nowrap !important;
+  visibility: visible !important;
+}
+
+.edit-product-button,
+.delete-product-button {
+  display: inline-flex !important;
+  visibility: visible !important;
+  flex: 0 0 auto;
+}
+
+.delete-product-button {
+  border-color: rgba(180, 65, 48, 0.22) !important;
+  color: var(--danger) !important;
+  background: var(--surface) !important;
+}
+
+.delete-product-button:hover:not(:disabled) {
+  border-color: var(--danger) !important;
+  background: var(--danger-soft) !important;
+}
