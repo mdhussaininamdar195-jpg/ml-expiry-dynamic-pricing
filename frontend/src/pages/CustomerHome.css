@@ -298,6 +298,15 @@
   opacity: 0.75;
 }
 
+.product-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
 .customer-product-content {
   padding: 18px;
 }

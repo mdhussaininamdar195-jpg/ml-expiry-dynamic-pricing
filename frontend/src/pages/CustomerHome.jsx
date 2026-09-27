@@ -10,12 +10,12 @@ const categories = [
   { label: "Vegetables", value: "Vegetables" },
   { label: "Beverages", value: "Beverages" },
   { label: "Snacks", value: "Snacks" },
-  { label: "Ready to Eat", value: "Ready_to_Eat" },
+  { label: "Ready to Eat", value: "Ready to Eat" },
   { label: "Meat", value: "Meat" },
   { label: "Seafood", value: "Seafood" },
   { label: "Deli", value: "Deli" },
-  { label: "Frozen Meals", value: "Frozen_Meals" },
-  { label: "Personal Care", value: "Personal_Care" },
+  { label: "Frozen Meals", value: "Frozen Meals" },
+  { label: "Personal Care", value: "Personal Care" },
 ];
 
 function ProductIcon({ category }) {
@@ -243,12 +243,11 @@ function CustomerHome() {
           params.set("category", selectedCategory);
         }
 
-        const data = await apiRequest(`/products?${params.toString()}`);
+        const data = await apiRequest(`/products/customer?${params.toString()}`);
         const pageProducts = Array.isArray(data) ? data : data.products ?? [];
 
         const mappedProducts = pageProducts.map((product) => {
           const prediction = product.prediction ?? {};
-          const daysLeft = Number(product.days_left ?? 0);
           const finalPrice = Number(
             prediction.final_price ??
               product.final_price ??
@@ -277,14 +276,23 @@ function CustomerHome() {
             recommendedDiscount,
             isDiscounted: recommendedDiscount > 0 && finalPrice < originalPrice,
             status,
-            daysLeft,
             stock: Number(product.current_stock ?? 0),
+            imageData: product.image_data ?? null,
           };
         });
 
         setProducts(mappedProducts);
         setTotalProducts(Number(data.total ?? pageProducts.length));
-        setTotalPages(Number(data.total_pages ?? 1));
+        // Calculate pages from the actual FEFO-visible total.
+        // Do not trust a stale backend total_pages value.
+        setTotalPages(
+          Math.max(
+            1,
+            Math.ceil(
+              Number(data.total ?? pageProducts.length) / PAGE_SIZE
+            )
+          )
+        );
 
         if (data.page && data.page !== currentPage) {
           setCurrentPage(Number(data.page));
@@ -557,7 +565,14 @@ function CustomerHome() {
                   key={product.id}
                 >
                   <div className="product-image">
-                    <ProductIcon category={product.category} />
+                    {product.imageData ? (
+                      <img
+                        src={product.imageData}
+                        alt={product.name}
+                      />
+                    ) : (
+                      <ProductIcon category={product.category} />
+                    )}
                   </div>
 
                   <div className="customer-product-content">

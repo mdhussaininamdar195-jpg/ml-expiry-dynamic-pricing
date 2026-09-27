@@ -2,6 +2,32 @@ import { useState } from "react";
 import "./EditProduct.css";
 import { apiRequest } from "../services/api";
 
+const CATEGORIES = [
+  "Dairy",
+  "Bakery",
+  "Fruits",
+  "Vegetables",
+  "Beverages",
+  "Snacks",
+  "Ready_to_Eat",
+  "Meat",
+  "Seafood",
+  "Deli",
+  "Frozen_Meals",
+  "Personal_Care",
+  "Produce",
+];
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () =>
+      reject(new Error("Could not read the selected image."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function ImageIcon() {
   return (
     <svg
@@ -36,6 +62,7 @@ function calculateDaysLeft(stockDate, expiryDate) {
 function AddProduct({ onBack, onSave }) {
   const [formData, setFormData] = useState({
     name: "",
+    productFamily: "",
     category: "Dairy",
     stockDate: "",
     expiryDate: "",
@@ -66,15 +93,29 @@ function AddProduct({ onBack, onSave }) {
     }
   }
 
-  function handleImageChange(event) {
+  async function handleImageChange(event) {
     const file = event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    const imageUrl = URL.createObjectURL(file);
-    setImagePreview(imageUrl);
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Image must be 2 MB or smaller.");
+      setImageInputKey((current) => current + 1);
+      return;
+    }
+
+    try {
+      const imageData = await fileToDataUrl(file);
+      setImagePreview(imageData);
+      setError("");
+    } catch (err) {
+      setError(
+        err.message || "Could not load the selected image."
+      );
+      setImageInputKey((current) => current + 1);
+    }
   }
 
   function handleRemoveImage() {
@@ -144,6 +185,9 @@ function AddProduct({ onBack, onSave }) {
     try {
       const productData = {
         product_name: formData.name.trim(),
+        product_family:
+          formData.productFamily.trim() ||
+          formData.name.trim(),
         category: formData.category,
         stock_date: formData.stockDate,
         expiry_date: formData.expiryDate,
@@ -154,6 +198,7 @@ function AddProduct({ onBack, onSave }) {
         sales_velocity: salesVelocity,
         days_left: daysLeft,
         expected_demand: expectedDemand,
+        image_data: imagePreview || null,
       };
 
       const response = await apiRequest("/products", {
@@ -187,8 +232,10 @@ function AddProduct({ onBack, onSave }) {
         demandRate: productData.demand_rate,
         salesVelocity: productData.sales_velocity,
         expectedDemand: productData.expected_demand,
+        productFamily: productData.product_family,
 
         imagePreview,
+        imageData: imagePreview,
       };
 
       if (onSave) {
@@ -265,12 +312,36 @@ function AddProduct({ onBack, onSave }) {
                 name="category"
                 value={formData.category}
                 onChange={handleChange}
+                required
               >
-                <option value="Dairy">Dairy</option>
-                <option value="Bakery">Bakery</option>
-                <option value="Produce">Produce</option>
-                <option value="Beverages">Beverages</option>
+                {CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {category === "Ready_to_Eat"
+                      ? "Ready to Eat"
+                      : category === "Frozen_Meals"
+                        ? "Frozen Meals"
+                        : category === "Personal_Care"
+                          ? "Personal Care"
+                          : category}
+                  </option>
+                ))}
               </select>
+            </label>
+
+            <label className="form-field">
+              <span>Product family</span>
+
+              <input
+                type="text"
+                name="productFamily"
+                value={formData.productFamily}
+                onChange={handleChange}
+                placeholder="Example: Chicken"
+              />
+
+              <small>
+                Use the same family for batches that should follow FEFO.
+              </small>
             </label>
 
             <label className="form-field">

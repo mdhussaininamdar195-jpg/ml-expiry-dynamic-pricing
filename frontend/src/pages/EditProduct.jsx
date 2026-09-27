@@ -1,12 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./EditProduct.css";
 import { apiRequest } from "../services/api";
 
 const BASE_CATEGORIES = [
   "Dairy",
   "Bakery",
-  "Produce",
+  "Fruits",
+  "Vegetables",
   "Beverages",
+  "Snacks",
+  "Ready_to_Eat",
+  "Meat",
+  "Seafood",
+  "Deli",
+  "Frozen_Meals",
+  "Personal_Care",
+  "Produce",
 ];
 
 function ImageIcon() {
@@ -25,6 +34,18 @@ function ImageIcon() {
       <path d="m4 17 5-5 3.5 3.5 2.5-2.5 5 5" />
     </svg>
   );
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () =>
+      reject(new Error("Could not read the selected image."));
+
+    reader.readAsDataURL(file);
+  });
 }
 
 function calculateDaysLeft(stockDate, expiryDate) {
@@ -62,19 +83,11 @@ function EditProduct({ product, onBack, onSave }) {
   });
 
   const [imagePreview, setImagePreview] = useState(
-    product?.imagePreview || null
+    product?.imageData || product?.imagePreview || null
   );
   const [imageInputKey, setImageInputKey] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    return () => {
-      if (imagePreview?.startsWith("blob:")) {
-        URL.revokeObjectURL(imagePreview);
-      }
-    };
-  }, [imagePreview]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -89,26 +102,33 @@ function EditProduct({ product, onBack, onSave }) {
     }
   }
 
-  function handleImageChange(event) {
+  async function handleImageChange(event) {
     const file = event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    if (imagePreview?.startsWith("blob:")) {
-      URL.revokeObjectURL(imagePreview);
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Image must be 2 MB or smaller.");
+      setImageInputKey((current) => current + 1);
+      return;
     }
 
-    const imageUrl = URL.createObjectURL(file);
-    setImagePreview(imageUrl);
+    try {
+      const imageData = await fileToDataUrl(file);
+      setImagePreview(imageData);
+
+      if (error) {
+        setError("");
+      }
+    } catch (err) {
+      setError(err.message || "Could not load the selected image.");
+      setImageInputKey((current) => current + 1);
+    }
   }
 
   function handleRemoveImage() {
-    if (imagePreview?.startsWith("blob:")) {
-      URL.revokeObjectURL(imagePreview);
-    }
-
     setImagePreview(null);
     setImageInputKey((current) => current + 1);
   }
@@ -175,6 +195,10 @@ function EditProduct({ product, onBack, onSave }) {
       const productData = {
         product_name: formData.name.trim(),
         category: formData.category,
+        product_family:
+          product?.productFamily ||
+          product?.product_family ||
+          "",
         stock_date: formData.stockDate,
         expiry_date: formData.expiryDate,
         current_stock: currentStock,
@@ -184,6 +208,7 @@ function EditProduct({ product, onBack, onSave }) {
         sales_velocity: salesVelocity,
         days_left: daysLeft,
         expected_demand: expectedDemand,
+        image_data: imagePreview || null,
       };
 
       const response = await apiRequest(
@@ -201,6 +226,7 @@ function EditProduct({ product, onBack, onSave }) {
         id: response.product_id ?? product.id,
         name: productData.product_name,
         category: productData.category,
+        productFamily: productData.product_family,
         price: Number(
           prediction.final_price ??
             productData.selling_price
@@ -450,8 +476,8 @@ function EditProduct({ product, onBack, onSave }) {
             <div className="image-upload-content">
               <strong>Product image</strong>
               <span>
-                JPG, PNG or WebP. Image preview is available
-                locally for now.
+                 JPG, PNG or WebP, up to 2 MB. The saved image
+                will also appear on the customer product card.
               </span>
 
               <div className="image-actions">

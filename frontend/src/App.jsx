@@ -1,91 +1,52 @@
-import "./App.css";
 import {
   BrowserRouter,
   Routes,
   Route,
   Navigate,
-  NavLink,
-  useLocation,
 } from "react-router-dom";
 
+import CustomerHome from "./pages/CustomerHome";
+
+import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminProducts from "./pages/AdminProducts";
-import CustomerHome from "./pages/CustomerHome";
-import AdminLogin from "./pages/AdminLogin";
+
 import AdminRoute from "./components/AdminRoute";
-
-function AdminNavigation() {
-  const location = useLocation();
-
-  // Do not show admin navigation on the login page.
-  if (
-    !location.pathname.startsWith("/admin") ||
-    location.pathname === "/admin/login"
-  ) {
-    return null;
-  }
-
-  return (
-    <nav className="admin-navigation">
-      <div className="admin-navigation-inner">
-        <div className="admin-navigation-brand">
-          <span className="admin-navigation-title">FreshFlow</span>
-          <span className="admin-navigation-label">
-            Administration
-          </span>
-        </div>
-
-        <div className="admin-navigation-links">
-          <NavLink
-            to="/admin"
-            end
-            className={({ isActive }) =>
-              `admin-nav-link ${isActive ? "active" : ""}`
-            }
-          >
-            Dashboard
-          </NavLink>
-
-          <NavLink
-            to="/admin/products"
-            className={({ isActive }) =>
-              `admin-nav-link ${isActive ? "active" : ""}`
-            }
-          >
-            Products
-          </NavLink>
-
-          <NavLink
-            to="/"
-            className="admin-nav-link customer-link"
-          >
-            Customer Store
-          </NavLink>
-        </div>
-      </div>
-    </nav>
-  );
-}
 
 function App() {
   return (
     <BrowserRouter>
-      <AdminNavigation />
-
       <Routes>
-        {/* Customer Store */}
+
+        {/* ================================================= */}
+        {/* CUSTOMER */}
+        {/* ================================================= */}
+
         <Route
           path="/"
           element={<CustomerHome />}
         />
 
-        {/* Admin Login - Public */}
+        <Route
+          path="/customer"
+          element={<CustomerHome />}
+        />
+
+
+        {/* ================================================= */}
+        {/* ADMIN LOGIN - PUBLIC */}
+        {/* ================================================= */}
+
         <Route
           path="/admin/login"
           element={<AdminLogin />}
         />
 
-        {/* Protected Admin Dashboard */}
+
+        {/* ================================================= */}
+        {/* ADMIN DASHBOARD - PROTECTED */}
+        {/* ================================================= */}
+
         <Route
           path="/admin"
           element={
@@ -95,7 +56,11 @@ function App() {
           }
         />
 
-        {/* Protected Admin Products */}
+
+        {/* ================================================= */}
+        {/* ADMIN PRODUCTS - PROTECTED */}
+        {/* ================================================= */}
+
         <Route
           path="/admin/products"
           element={
@@ -105,11 +70,21 @@ function App() {
           }
         />
 
-        {/* Unknown URL */}
+
+        {/* ================================================= */}
+        {/* UNKNOWN ROUTES */}
+        {/* ================================================= */}
+
         <Route
           path="*"
-          element={<Navigate to="/" replace />}
+          element={
+            <Navigate
+              to="/"
+              replace
+            />
+          }
         />
+
       </Routes>
     </BrowserRouter>
   );

@@ -7,7 +7,6 @@ from pathlib import Path
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-
 DATABASE_PATH = BASE_DIR / "products.db"
 
 
@@ -16,13 +15,8 @@ DATABASE_PATH = BASE_DIR / "products.db"
 # ============================================================
 
 def get_connection():
-
-    connection = sqlite3.connect(
-        DATABASE_PATH
-    )
-
+    connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
-
     return connection
 
 
@@ -31,11 +25,9 @@ def get_connection():
 # ============================================================
 
 def create_table():
-
     connection = get_connection()
 
     try:
-
         cursor = connection.cursor()
 
         cursor.execute("""
@@ -69,14 +61,31 @@ def create_table():
                 wastage_quantity INTEGER,
                 expiry_risk REAL,
                 waste_risk TEXT,
-                recommended_discount REAL
+                recommended_discount REAL,
+
+                -- Product image stored as a data URL.
+                -- This keeps the existing SQLite architecture and
+                -- allows the customer frontend to display the image.
+                image_data TEXT
             )
         """)
+
+        # Safe migration for an existing products.db.
+        cursor.execute("PRAGMA table_info(products)")
+        existing_columns = {
+            row["name"]
+            for row in cursor.fetchall()
+        }
+
+        if "image_data" not in existing_columns:
+            cursor.execute("""
+                ALTER TABLE products
+                ADD COLUMN image_data TEXT
+            """)
 
         connection.commit()
 
     finally:
-
         connection.close()
 
 
@@ -85,11 +94,9 @@ def create_table():
 # ============================================================
 
 def create_users_table():
-
     connection = get_connection()
 
     try:
-
         cursor = connection.cursor()
 
         cursor.execute("""
@@ -103,12 +110,10 @@ def create_users_table():
                 hashed_password TEXT NOT NULL,
 
                 is_active INTEGER DEFAULT 1,
-
                 role TEXT DEFAULT 'customer'
             )
         """)
 
-        # Add role column to an existing users table
         cursor.execute("PRAGMA table_info(users)")
 
         existing_columns = {
@@ -117,13 +122,11 @@ def create_users_table():
         }
 
         if "role" not in existing_columns:
-
             cursor.execute("""
                 ALTER TABLE users
                 ADD COLUMN role TEXT DEFAULT 'customer'
             """)
 
-        # Make the existing admin account an admin
         cursor.execute("""
             UPDATE users
             SET role = 'admin'
@@ -133,7 +136,6 @@ def create_users_table():
         connection.commit()
 
     finally:
-
         connection.close()
 
 
@@ -142,11 +144,9 @@ def create_users_table():
 # ============================================================
 
 def create_purchases_table():
-
     connection = get_connection()
 
     try:
-
         cursor = connection.cursor()
 
         cursor.execute("""
@@ -170,7 +170,6 @@ def create_purchases_table():
             )
         """)
 
-        # Add new columns to an existing purchases table
         cursor.execute("PRAGMA table_info(purchases)")
 
         existing_columns = {
@@ -179,14 +178,12 @@ def create_purchases_table():
         }
 
         if "days_left_at_purchase" not in existing_columns:
-
             cursor.execute("""
                 ALTER TABLE purchases
                 ADD COLUMN days_left_at_purchase INTEGER
             """)
 
         if "waste_risk_at_purchase" not in existing_columns:
-
             cursor.execute("""
                 ALTER TABLE purchases
                 ADD COLUMN waste_risk_at_purchase TEXT
@@ -195,5 +192,4 @@ def create_purchases_table():
         connection.commit()
 
     finally:
-
         connection.close()
