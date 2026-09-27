@@ -43,7 +43,16 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    # Allow the Vite development server whether the browser is opened
+    # through localhost or 127.0.0.1, including when Vite moves to another
+    # local development port.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,53 +67,74 @@ create_purchases_table()
 # PRODUCT FAMILY / BATCH MIGRATION
 # ============================================================
 
+def _looks_like_batch_name(product_name: str) -> bool:
+    """
+    Detect only explicitly batch-formatted names.
+
+    Legacy products such as "Product 1" are NOT automatically considered
+    batches. Supported implicit batch forms are:
+      - batch 1 chicken
+      - batch 2 chicken
+      - chicken batch 1
+    """
+    value = (product_name or "").strip()
+
+    if not value:
+        return False
+
+    return bool(
+        re.match(r"^batch\s*\d+\s+", value, flags=re.IGNORECASE)
+        or re.search(r"\s+batch\s*\d+\s*$", value, flags=re.IGNORECASE)
+    )
+
+
 def _legacy_product_family(product_name: str) -> str:
+    """
+    Derive a family only from an explicitly batch-formatted name.
+
+    Ordinary legacy/non-batch products remain their own family.
+    """
     value = (product_name or "").strip()
 
     if not value:
         return ""
 
-    # Handles names such as:
-    #   batch 1 chicken -> chicken
-    #   batch 2 chicken -> chicken
-    #   chicken batch 1 -> chicken
-    #   chicken 1 -> chicken
+    if not _looks_like_batch_name(value):
+        return value
+
     cleaned = re.sub(
         r"^batch\s*\d+\s+",
         "",
         value,
         flags=re.IGNORECASE,
     )
+
     cleaned = re.sub(
         r"\s+batch\s*\d+\s*$",
         "",
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(
-        r"\s+\d+\s*$",
-        "",
-        cleaned,
-    )
 
     return cleaned.strip() or value
 
 
-def _normalize_product_family(product_name: str, product_family: str | None = None) -> str:
+def _normalize_product_family(
+    product_name: str,
+    product_family: str | None = None,
+) -> str:
     name = (product_name or "").strip()
     family = (product_family or "").strip()
 
-    # If no family was explicitly supplied, derive it from the name.
     if not family:
         return _legacy_product_family(name)
 
-    # The older AddProduct screen used the product name as the default
-    # family. Treat that as an implicit family and normalize batch names.
+    # If the old UI stored the product name as the default family, only
+    # derive a family when the name is explicitly batch-formatted.
     if family.casefold() == name.casefold():
         return _legacy_product_family(name)
 
     return family
-
 
 def _ensure_product_family_column():
     connection = get_connection()
@@ -133,13 +163,21 @@ def _ensure_product_family_column():
         product_name = (row["product_name"] or "").strip()
         normalized_name_family = _legacy_product_family(product_name)
 
-        # Repair families created from batch-style names, while preserving
-        # genuinely explicit custom families.
+        # Repair empty/implicit families while preserving ordinary legacy
+        # products as individual products.
         if (
             not current_family
             or current_family.casefold() == product_name.casefold()
-            or re.match(r"^batch\s*\d+\s+", current_family, re.IGNORECASE)
-            or re.search(r"\s+batch\s*\d+\s*$", current_family, re.IGNORECASE)
+            or re.match(
+                r"^batch\s*\d+\s+",
+                current_family,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"\s+batch\s*\d+\s*$",
+                current_family,
+                re.IGNORECASE,
+            )
         ):
             current_family = normalized_name_family
 
@@ -682,83 +720,210 @@ def get_customer_products(
     search: str | None = None,
     category: str | None = None,
 ):
+    """
+    Customer catalogue.
+
+    Legacy products:
+      - Every old/non-batch product with stock > 0 remains visible.
+      - Legacy products are NOT grouped together.
+      - Their historical/missing expiry does not make the old catalogue
+        disappear.
+
+    New batch products:
+      - A product is treated as a batch when it has an explicit
+        product_family different from its product_name, or an explicit
+        "batch N" name.
+      - Only non-expired, in-stock batches are eligible.
+      - One earliest-expiring batch is shown per family.
+
+    Pagination happens after the visible-product selection.
+    """
+
+    def normalize_category(value):
+        return re.sub(
+            r"[_\-\s]+",
+            " ",
+            str(value or ""),
+        ).strip().casefold()
+
+    def normalize_family(value):
+        return re.sub(
+            r"[_\-\s]+",
+            " ",
+            str(value or ""),
+        ).strip().casefold()
+
+    def parse_expiry(value):
+        if value is None:
+            return None
+
+        text = str(value).strip()
+
+        if not text:
+            return None
+
+        formats = (
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d-%m-%Y",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%Y/%m/%d",
+        )
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+
+        try:
+            return datetime.fromisoformat(
+                text.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+        except ValueError:
+            return None
+
+    def is_batch_row(product_data):
+        product_name = str(
+            product_data.get("product_name") or ""
+        ).strip()
+
+        stored_family = str(
+            product_data.get("product_family") or ""
+        ).strip()
+
+        # New batch products have an explicit family different from their
+        # displayed product name.
+        if stored_family and (
+            normalize_family(stored_family)
+            != normalize_family(product_name)
+        ):
+            return True
+
+        # Also support explicit "batch N ..." / "... batch N" names.
+        return _looks_like_batch_name(product_name)
+
+    def category_matches(row_category, requested_category):
+        row_key = normalize_category(row_category)
+        requested_key = normalize_category(requested_category)
+
+        if not requested_key or requested_key == "all":
+            return True
+
+        if row_key == requested_key:
+            return True
+
+        # Backward compatibility for the older database category "Produce".
+        # The old catalogue used one Produce category while the newer UI
+        # exposes Fruits and Vegetables separately. We keep Produce visible
+        # under both filters rather than hiding those legacy products.
+        if row_key == "produce" and requested_key in {
+            "fruits",
+            "vegetables",
+        }:
+            return True
+
+        return False
+
+    today = datetime.now().date()
+    normalized_search = (search or "").strip().casefold()
 
     connection = get_connection()
     cursor = connection.cursor()
 
-    where_clauses = [
-        "current_stock > 0",
-        "expiry_date IS NOT NULL",
-        "date(expiry_date) >= date('now', 'localtime')",
-    ]
-
-    parameters = []
-
-    if search and search.strip():
-
-        where_clauses.append(
-            "LOWER(product_name) LIKE LOWER(?)"
-        )
-
-        parameters.append(
-            f"%{search.strip()}%"
-        )
-
-    if category and category.strip().lower() != "all":
-
-        # Customer categories may be stored with spaces or underscores
-        # depending on when the product was created. Normalize both sides
-        # so filtering never returns a false 0-product result.
-        where_clauses.append(
-            "REPLACE(LOWER(category), '_', ' ') = REPLACE(LOWER(?), '_', ' ')"
-        )
-
-        parameters.append(
-            category.strip()
-        )
-
-    where_sql = " AND ".join(
-        where_clauses
-    )
-
-    cursor.execute(
-        f"""
+    cursor.execute("""
         SELECT *
         FROM products
-        WHERE {where_sql}
-        ORDER BY
-            LOWER(product_name),
-            LOWER(category),
-            date(expiry_date) ASC,
-            id ASC
-        """,
-        parameters,
-    )
+        WHERE COALESCE(current_stock, 0) > 0
+    """)
 
     rows = cursor.fetchall()
-
     connection.close()
 
     selected = {}
 
     for row in rows:
-
         product_data = dict(row)
 
-        family_key = (
-            (
-                product_data.get("product_family")
-                or _legacy_product_family(product_data["product_name"])
-            )
-            .strip()
-            .lower(),
+        product_name = str(
+            product_data.get("product_name") or ""
+        ).strip()
 
-            product_data["category"]
-            .strip()
-            .lower(),
+        row_category = str(
+            product_data.get("category") or ""
+        ).strip()
+
+        if normalized_search and (
+            normalized_search not in product_name.casefold()
+        ):
+            continue
+
+        if not category_matches(
+            row_category,
+            category,
+        ):
+            continue
+
+        batch_row = is_batch_row(product_data)
+
+        expiry = parse_expiry(
+            product_data.get("expiry_date")
         )
 
-        if family_key not in selected:
+        if batch_row:
+            # New FEFO batches must still be genuinely sellable.
+            if expiry is None or expiry.date() < today:
+                continue
+
+            stored_family = str(
+                product_data.get("product_family") or ""
+            ).strip()
+
+            family = (
+                stored_family
+                if stored_family
+                and normalize_family(stored_family)
+                != normalize_family(product_name)
+                else _legacy_product_family(product_name)
+            )
+
+            family_key = (
+                "batch::"
+                + normalize_family(family)
+                + "::"
+                + normalize_category(row_category)
+            )
+
+            existing = selected.get(family_key)
+
+            if existing is None:
+                selected[family_key] = product_data
+                continue
+
+            existing_expiry = parse_expiry(
+                existing.get("expiry_date")
+            )
+
+            if (
+                existing_expiry is None
+                or expiry < existing_expiry
+                or (
+                    expiry == existing_expiry
+                    and int(product_data.get("id") or 0)
+                    < int(existing.get("id") or 0)
+                )
+            ):
+                selected[family_key] = product_data
+
+        else:
+            # Legacy/non-batch products are independent catalogue products.
+            # Do not let the newly-added FEFO rules hide them.
+            family_key = (
+                "legacy::"
+                + str(product_data.get("id"))
+            )
 
             selected[family_key] = product_data
 
@@ -769,8 +934,9 @@ def get_customer_products(
 
     customer_products.sort(
         key=lambda item: (
-            item["product_name"].lower(),
-            item["category"].lower(),
+            str(item.get("product_name") or "").casefold(),
+            normalize_category(item.get("category")),
+            int(item.get("id") or 0),
         )
     )
 
@@ -778,26 +944,18 @@ def get_customer_products(
 
     total_pages = max(
         1,
-        (total + page_size - 1)
-        // page_size
+        (total + page_size - 1) // page_size,
     )
 
-    page = min(
-        page,
-        total_pages
-    )
-
-    offset = (
-        (page - 1)
-        * page_size
-    )
+    safe_page = min(page, total_pages)
+    offset = (safe_page - 1) * page_size
 
     return {
         "products": customer_products[
             offset:offset + page_size
         ],
         "total": total,
-        "page": page,
+        "page": safe_page,
         "page_size": page_size,
         "total_pages": total_pages,
     }
@@ -1090,47 +1248,178 @@ def purchase_product(
                 detail="Product not found"
             )
 
-        # FEFO:
-        # Find earliest-expiring valid batch
-        cursor.execute("""
-            SELECT
-                id,
-                product_name,
-                category,
-                stock_date,
-                expiry_date,
-                current_stock,
-                historical_sales,
-                selling_price,
-                demand_rate,
-                sales_velocity,
-                days_left,
-                expected_demand,
-                prediction,
-                waste_risk
-            FROM products
-            WHERE LOWER(TRIM(COALESCE(
-                        NULLIF(product_family, ''),
-                        product_name
-                    )))
-                    = LOWER(TRIM(COALESCE(?, ?)))
-              AND LOWER(TRIM(category))
-                    = LOWER(TRIM(?))
-              AND current_stock > 0
-              AND expiry_date IS NOT NULL
-              AND date(expiry_date)
-                    >= date('now', 'localtime')
-            ORDER BY
-                date(expiry_date) ASC,
-                id ASC
-            LIMIT 1
-        """, (
-            requested_product["product_family"],
-            requested_product["product_name"],
-            requested_product["category"],
-        ))
+        requested_name = str(
+            requested_product["product_name"] or ""
+        ).strip()
 
-        product = cursor.fetchone()
+        requested_stored_family = str(
+            requested_product["product_family"] or ""
+        ).strip()
+
+        requested_is_batch = (
+            (
+                requested_stored_family
+                and requested_stored_family.casefold()
+                != requested_name.casefold()
+            )
+            or _looks_like_batch_name(requested_name)
+        )
+
+        if not requested_is_batch:
+            # Legacy/non-batch product: purchase exactly the row the customer
+            # selected. Never substitute another old product.
+            product = requested_product
+        else:
+            requested_family = _normalize_product_family(
+                requested_name,
+                requested_stored_family,
+            )
+
+            cursor.execute("""
+                SELECT
+                    id,
+                    product_name,
+                    product_family,
+                    category,
+                    stock_date,
+                    expiry_date,
+                    current_stock,
+                    historical_sales,
+                    selling_price,
+                    demand_rate,
+                    sales_velocity,
+                    days_left,
+                    expected_demand,
+                    prediction,
+                    waste_risk
+                FROM products
+                WHERE LOWER(TRIM(category))
+                        = LOWER(TRIM(?))
+                  AND current_stock > 0
+                  AND expiry_date IS NOT NULL
+                ORDER BY
+                    id ASC
+            """, (
+                requested_product["category"],
+            ))
+
+            eligible_batches = cursor.fetchall()
+
+            product = None
+
+            today = datetime.now().date()
+
+            for candidate in eligible_batches:
+                candidate_name = str(
+                    candidate["product_name"] or ""
+                ).strip()
+
+                candidate_family_value = str(
+                    candidate["product_family"] or ""
+                ).strip()
+
+                candidate_is_batch = (
+                    (
+                        candidate_family_value
+                        and candidate_family_value.casefold()
+                        != candidate_name.casefold()
+                    )
+                    or _looks_like_batch_name(candidate_name)
+                )
+
+                if not candidate_is_batch:
+                    continue
+
+                candidate_family = _normalize_product_family(
+                    candidate_name,
+                    candidate_family_value,
+                )
+
+                if candidate_family.casefold() != requested_family.casefold():
+                    continue
+
+                expiry_text = str(
+                    candidate["expiry_date"] or ""
+                ).strip()
+
+                candidate_expiry = None
+
+                for fmt in (
+                    "%Y-%m-%d",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%d-%m-%Y",
+                    "%d/%m/%Y",
+                    "%m/%d/%Y",
+                    "%Y/%m/%d",
+                ):
+                    try:
+                        candidate_expiry = datetime.strptime(
+                            expiry_text,
+                            fmt,
+                        )
+                        break
+                    except ValueError:
+                        pass
+
+                if candidate_expiry is None:
+                    try:
+                        candidate_expiry = datetime.fromisoformat(
+                            expiry_text.replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                    except ValueError:
+                        continue
+
+                if candidate_expiry.date() < today:
+                    continue
+
+                if product is None:
+                    product = candidate
+                    continue
+
+                current_expiry_text = str(
+                    product["expiry_date"] or ""
+                ).strip()
+
+                current_expiry = None
+
+                for fmt in (
+                    "%Y-%m-%d",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%d-%m-%Y",
+                    "%d/%m/%Y",
+                    "%m/%d/%Y",
+                    "%Y/%m/%d",
+                ):
+                    try:
+                        current_expiry = datetime.strptime(
+                            current_expiry_text,
+                            fmt,
+                        )
+                        break
+                    except ValueError:
+                        pass
+
+                if current_expiry is None:
+                    try:
+                        current_expiry = datetime.fromisoformat(
+                            current_expiry_text.replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                    except ValueError:
+                        current_expiry = None
+
+                if (
+                    current_expiry is None
+                    or candidate_expiry < current_expiry
+                    or (
+                        candidate_expiry == current_expiry
+                        and int(candidate["id"] or 0)
+                        < int(product["id"] or 0)
+                    )
+                ):
+                    product = candidate
+
 
         if product is None:
 

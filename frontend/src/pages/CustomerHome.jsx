@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./CustomerHome.css";
 import { apiRequest } from "../services/api";
 
@@ -8,6 +8,7 @@ const categories = [
   { label: "Bakery", value: "Bakery" },
   { label: "Fruits", value: "Fruits" },
   { label: "Vegetables", value: "Vegetables" },
+  { label: "Produce", value: "Produce" },
   { label: "Beverages", value: "Beverages" },
   { label: "Snacks", value: "Snacks" },
   { label: "Ready to Eat", value: "Ready to Eat" },
@@ -219,16 +220,15 @@ function CustomerHome() {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [purchaseError, setPurchaseError] = useState("");
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const requestIdRef = useRef(0);
 
   const PAGE_SIZE = 20;
 
   useEffect(() => {
-    const timer = setTimeout(() => setCurrentPage(1), 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm, selectedCategory]);
+    let cancelled = false;
 
-  useEffect(() => {
     async function loadProducts() {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setLoadError("");
 
@@ -238,23 +238,43 @@ function CustomerHome() {
           page_size: String(PAGE_SIZE),
         });
 
-        if (searchTerm.trim()) params.set("search", searchTerm.trim());
-        if (selectedCategory !== "All") {
-          params.set("category", selectedCategory);
+        const normalizedSearch = searchTerm.trim();
+        if (normalizedSearch) {
+          params.set("search", normalizedSearch);
         }
 
-        const data = await apiRequest(`/products/customer?${params.toString()}`);
-        const pageProducts = Array.isArray(data) ? data : data.products ?? [];
+        if (selectedCategory !== "All") {
+          // Send the exact category value represented by the UI.
+          // The backend normalizes spaces/underscores/hyphens.
+          params.set("category", selectedCategory.trim());
+        }
+
+        const data = await apiRequest(
+          `/products/customer?${params.toString()}`
+        );
+
+        if (cancelled || requestId !== requestIdRef.current) return;
+
+        const pageProducts = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.products)
+            ? data.products
+            : [];
 
         const mappedProducts = pageProducts.map((product) => {
           const prediction = product.prediction ?? {};
+
           const finalPrice = Number(
             prediction.final_price ??
               product.final_price ??
               product.selling_price ??
               0
           );
-          const originalPrice = Number(product.selling_price ?? 0);
+
+          const originalPrice = Number(
+            product.selling_price ?? 0
+          );
+
           const recommendedDiscount = Number(
             prediction.recommended_discount ??
               product.recommended_discount ??
@@ -262,9 +282,14 @@ function CustomerHome() {
           );
 
           let status = "";
-          if (recommendedDiscount > 50) status = "Great deal";
-          else if (recommendedDiscount >= 16) status = "Reduced price";
-          else if (recommendedDiscount > 0) status = "Small saving";
+
+          if (recommendedDiscount > 50) {
+            status = "Great deal";
+          } else if (recommendedDiscount >= 16) {
+            status = "Reduced price";
+          } else if (recommendedDiscount > 0) {
+            status = "Small saving";
+          }
 
           return {
             id: product.id,
@@ -274,7 +299,9 @@ function CustomerHome() {
             price: finalPrice,
             originalPrice,
             recommendedDiscount,
-            isDiscounted: recommendedDiscount > 0 && finalPrice < originalPrice,
+            isDiscounted:
+              recommendedDiscount > 0 &&
+              finalPrice < originalPrice,
             status,
             stock: Number(product.current_stock ?? 0),
             imageData: product.image_data ?? null,
@@ -282,32 +309,75 @@ function CustomerHome() {
         });
 
         setProducts(mappedProducts);
-        setTotalProducts(Number(data.total ?? pageProducts.length));
-        // Calculate pages from the actual FEFO-visible total.
-        // Do not trust a stale backend total_pages value.
+
+        const serverTotal = Number(
+          data?.total ?? mappedProducts.length
+        );
+
+        const serverPageSize = Number(
+          data?.page_size ?? PAGE_SIZE
+        );
+
+        const serverTotalPages = Number(
+          data?.total_pages ??
+            Math.ceil(serverTotal / serverPageSize)
+        );
+
+        setTotalProducts(
+          Number.isFinite(serverTotal)
+            ? serverTotal
+            : mappedProducts.length
+        );
+
         setTotalPages(
           Math.max(
             1,
-            Math.ceil(
-              Number(data.total ?? pageProducts.length) / PAGE_SIZE
-            )
+            Number.isFinite(serverTotalPages)
+              ? serverTotalPages
+              : Math.ceil(serverTotal / PAGE_SIZE)
           )
         );
 
-        if (data.page && data.page !== currentPage) {
+        if (
+          data?.page &&
+          Number(data.page) !== currentPage
+        ) {
           setCurrentPage(Number(data.page));
         }
       } catch (error) {
-        console.error("Failed to load customer products:", error);
-        setLoadError(error.message || "Failed to load products.");
+        if (cancelled || requestId !== requestIdRef.current) return;
+
+        console.error(
+          "Failed to load customer products:",
+          error
+        );
+
+        setLoadError(
+          error.message ||
+            "Failed to load products."
+        );
+
         setProducts([]);
+        setTotalProducts(0);
+        setTotalPages(1);
       } finally {
-        setLoading(false);
+        if (!cancelled && requestId === requestIdRef.current) {
+          setLoading(false);
+        }
       }
     }
 
     loadProducts();
-  }, [currentPage, searchTerm, selectedCategory, refreshVersion]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentPage,
+    searchTerm,
+    selectedCategory,
+    refreshVersion,
+  ]);
 
   const pageNumbers = getPageNumbers(currentPage, totalPages);
 
@@ -497,24 +567,27 @@ function CustomerHome() {
               placeholder="Search groceries"
               aria-label="Search groceries"
               value={searchTerm}
-              onChange={(event) =>
-                setSearchTerm(event.target.value)
-              }
+              onChange={(event) => {
+                setCurrentPage(1);
+                setSearchTerm(event.target.value);
+              }}
             />
           </div>
 
           <div className="category-list">
             {categories.map((category) => (
               <button
+                type="button"
                 key={category.value}
                 className={`category-button ${
                   selectedCategory === category.value
                     ? "selected"
                     : ""
                 }`}
-                onClick={() =>
-                  setSelectedCategory(category.value)
-                }
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedCategory(category.value);
+                }}
               >
                 {category.label}
               </button>
@@ -578,7 +651,8 @@ function CustomerHome() {
                   <div className="customer-product-content">
                     <div className="product-meta">
                       <span>
-                        {product.category.replaceAll("_", " ")}
+                        {String(product.category || "Unknown")
+                          .replace(/[_-]+/g, " ")}
                       </span>
 
                     </div>
@@ -747,7 +821,8 @@ function CustomerHome() {
                         <strong>{product.name}</strong>
 
                         <span>
-                          {product.category.replaceAll("_", " ")}
+                          {String(product.category || "Unknown")
+                          .replace(/[_-]+/g, " ")}
                         </span>
 
                         <div className="cart-item-bottom">
