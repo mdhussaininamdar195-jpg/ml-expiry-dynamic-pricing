@@ -197,6 +197,136 @@ def _ensure_product_family_column():
 _ensure_product_family_column()
 
 
+def _ensure_product_gallery_column():
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("PRAGMA table_info(products)")
+    columns = {
+        row["name"] if isinstance(row, dict) else row[1]
+        for row in cursor.fetchall()
+    }
+
+    if "product_images" not in columns:
+        cursor.execute(
+            "ALTER TABLE products ADD COLUMN product_images TEXT"
+        )
+
+    connection.commit()
+    connection.close()
+
+
+_ensure_product_gallery_column()
+
+
+def _ensure_product_source_column():
+    """Track whether a product was added manually by an admin."""
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("PRAGMA table_info(products)")
+    columns = {
+        row["name"] if isinstance(row, dict) else row[1]
+        for row in cursor.fetchall()
+    }
+
+    if "is_admin_added" not in columns:
+        cursor.execute(
+            "ALTER TABLE products ADD COLUMN is_admin_added INTEGER NOT NULL DEFAULT 0"
+        )
+
+        # The current imported dataset contains 26,000 rows. Existing rows
+        # after that point were added through the admin UI.
+        cursor.execute(
+            "UPDATE products SET is_admin_added = 1 WHERE id > 26000"
+        )
+
+    connection.commit()
+    connection.close()
+
+
+_ensure_product_source_column()
+
+
+# ============================================================
+# DERIVED SALES / DEMAND METRICS
+# ============================================================
+
+def _derive_sales_metrics(
+    stock_date: str | None,
+    expiry_date: str | None,
+    historical_sales: int,
+):
+    """
+    Derive simple operational sales metrics from actual sales history.
+
+    A brand-new product has no sales history, so all three derived demand
+    metrics start at zero. As purchases happen, the values are recalculated
+    from actual historical sales rather than asking the retailer to guess.
+    """
+    historical_sales = max(int(historical_sales or 0), 0)
+
+    stock_text = str(stock_date or "").strip()
+    expiry_text = str(expiry_date or "").strip()
+
+    def parse_date(value: str):
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d-%m-%Y",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%Y/%m/%d",
+        ):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+        except ValueError:
+            return None
+
+    stock_dt = parse_date(stock_text) if stock_text else None
+    expiry_dt = parse_date(expiry_text) if expiry_text else None
+
+    if historical_sales <= 0 or stock_dt is None:
+        return {
+            "demand_rate": 0.0,
+            "sales_velocity": 0,
+            "expected_demand": 0,
+        }
+
+    today = datetime.now().date()
+    elapsed_days = max((today - stock_dt.date()).days + 1, 1)
+
+    # Average units sold per day.
+    demand_rate = round(historical_sales / elapsed_days, 2)
+
+    # Keep the existing INTEGER database field.
+    sales_velocity = max(0, round(demand_rate))
+
+    if expiry_dt is None:
+        days_remaining = 0
+    else:
+        days_remaining = max((expiry_dt.date() - today).days, 0)
+
+    expected_demand = max(
+        0,
+        round(demand_rate * days_remaining),
+    )
+
+    return {
+        "demand_rate": demand_rate,
+        "sales_velocity": sales_velocity,
+        "expected_demand": expected_demand,
+    }
+
+
 # ============================================================
 # PRODUCT INPUT MODEL
 # ============================================================
@@ -213,17 +343,20 @@ class Product(BaseModel):
     expiry_date: str
 
     current_stock: int
-    historical_sales: int
+    # These metrics are derived by the system. A new product starts with
+    # no historical sales, so they default to zero.
+    historical_sales: int = 0
 
     selling_price: float
 
-    demand_rate: float
-    sales_velocity: int
+    demand_rate: float = 0.0
+    sales_velocity: int = 0
 
-    days_left: int
-    expected_demand: int
+    days_left: int = 0
+    expected_demand: int = 0
 
     image_data: str | None = None
+    images: list[str] | None = None
 
 
 # ============================================================
@@ -262,6 +395,67 @@ def _decode_prediction(product_data: dict) -> dict:
     return product_data
 
 
+def _calculate_shelf_life_days(product_data: dict):
+    """Return total shelf life in days: Expiry Date - Stock Date.
+
+    This is a customer-facing informational value only. It is deliberately
+    different from remaining shelf life and does not expose either date.
+    """
+    stock_text = str(product_data.get("stock_date") or "").strip()
+    expiry_text = str(product_data.get("expiry_date") or "").strip()
+
+    if not stock_text or not expiry_text:
+        return None
+
+    def parse_date(value: str):
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d-%m-%Y",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%Y/%m/%d",
+        ):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+        except ValueError:
+            return None
+
+    stock_date = parse_date(stock_text)
+    expiry_date = parse_date(expiry_text)
+
+    if stock_date is None or expiry_date is None:
+        return None
+
+    return max(0, (expiry_date.date() - stock_date.date()).days)
+
+
+def _parse_product_images(product_data: dict) -> list[str]:
+    raw_images = product_data.get("product_images")
+
+    if isinstance(raw_images, list):
+        return [str(image) for image in raw_images if image]
+
+    if isinstance(raw_images, str) and raw_images.strip():
+        try:
+            parsed = json.loads(raw_images)
+            if isinstance(parsed, list):
+                return [str(image) for image in parsed if image]
+        except json.JSONDecodeError:
+            pass
+
+    image_data = product_data.get("image_data")
+    return [image_data] if image_data else []
+
+
 def _customer_product(product_data: dict) -> dict:
     product_data = _decode_prediction(dict(product_data))
     prediction = product_data.get("prediction") or {}
@@ -288,8 +482,12 @@ def _customer_product(product_data: dict) -> dict:
                 product_data.get("recommended_discount") or 0,
             )
         ),
+        # Customer details show TOTAL shelf life only.
+        # Expiry date and remaining shelf life are intentionally not returned.
+        "shelf_life_days": _calculate_shelf_life_days(product_data),
         "waste_risk": product_data.get("waste_risk"),
         "image_data": product_data.get("image_data"),
+        "images": _parse_product_images(product_data),
         "prediction": prediction,
     }
 
@@ -500,6 +698,15 @@ def create_product(
     current_user: dict = Depends(get_current_admin)
 ):
 
+    # A newly added product has no historical sales yet. Do not make the
+    # retailer invent ML metrics. The values are initialized from the server.
+    initial_historical_sales = 0
+    initial_metrics = _derive_sales_metrics(
+        product.stock_date,
+        product.expiry_date,
+        initial_historical_sales,
+    )
+
     product_data = {
 
         "Product_Name": product.product_name,
@@ -509,15 +716,15 @@ def create_product(
         "Expiry_Date": product.expiry_date,
 
         "Current_Stock": product.current_stock,
-        "Historical_Sales": product.historical_sales,
+        "Historical_Sales": initial_historical_sales,
 
         "Selling_Price": product.selling_price,
 
-        "Demand_Rate": product.demand_rate,
-        "Sales_Velocity": product.sales_velocity,
+        "Demand_Rate": initial_metrics["demand_rate"],
+        "Sales_Velocity": initial_metrics["sales_velocity"],
 
         "Days_Left": product.days_left,
-        "Expected_Demand": product.expected_demand
+        "Expected_Demand": initial_metrics["expected_demand"]
     }
 
     prediction = predict_price(product_data)
@@ -545,9 +752,11 @@ def create_product(
             waste_risk,
             recommended_discount,
             final_price,
-            image_data
+            image_data,
+            product_images,
+            is_admin_added
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         product.product_name,
         (
@@ -560,17 +769,23 @@ def create_product(
         product.stock_date,
         product.expiry_date,
         product.current_stock,
-        product.historical_sales,
+        product_data["Historical_Sales"],
         product.selling_price,
-        product.demand_rate,
-        product.sales_velocity,
+        product_data["Demand_Rate"],
+        product_data["Sales_Velocity"],
         product.days_left,
-        product.expected_demand,
+        product_data["Expected_Demand"],
         prediction_json,
         prediction.get("waste_risk_category"),
         prediction.get("recommended_discount"),
         prediction.get("final_price"),
-        product.image_data
+        product.image_data,
+        json.dumps(
+            product.images
+            if product.images is not None
+            else ([product.image_data] if product.image_data else [])
+        ),
+        1
     ))
 
     connection.commit()
@@ -582,7 +797,11 @@ def create_product(
     return {
         "message": "Product added successfully",
         "product_id": product_id,
-        "prediction": prediction
+        "prediction": prediction,
+        "historical_sales": product_data["Historical_Sales"],
+        "demand_rate": product_data["Demand_Rate"],
+        "sales_velocity": product_data["Sales_Velocity"],
+        "expected_demand": product_data["Expected_Demand"],
     }
 
 
@@ -724,8 +943,10 @@ def get_customer_products(
     Customer catalogue.
 
     Legacy products:
-      - Every old/non-batch product with stock > 0 remains visible.
-      - Legacy products are NOT grouped together.
+      - In-stock legacy/non-batch inventory rows are eligible.
+      - Multiple inventory rows for the same product name/category are grouped
+        into one customer-facing product card.
+      - The earliest-expiring valid row is used for that card.
       - Their historical/missing expiry does not make the old catalogue
         disappear.
 
@@ -837,6 +1058,7 @@ def get_customer_products(
         SELECT *
         FROM products
         WHERE COALESCE(current_stock, 0) > 0
+        ORDER BY id ASC
     """)
 
     rows = cursor.fetchall()
@@ -918,27 +1140,75 @@ def get_customer_products(
                 selected[family_key] = product_data
 
         else:
-            # Legacy/non-batch products are independent catalogue products.
-            # Do not let the newly-added FEFO rules hide them.
-            family_key = (
+            # Legacy/non-batch products may have many inventory rows for the
+            # same real-world product (for example, many Apple rows with
+            # different stock, prices, and expiry dates).
+            #
+            # The customer catalogue should show ONE card per unique
+            # product-name/category combination. We keep the earliest-expiring
+            # in-stock row so the customer-facing catalogue follows FEFO while
+            # preserving that row's actual price, stock and ML prediction.
+            product_key = (
                 "legacy::"
-                + str(product_data.get("id"))
+                + normalize_family(product_name)
+                + "::"
+                + normalize_category(row_category)
             )
 
-            selected[family_key] = product_data
+            existing = selected.get(product_key)
+
+            if existing is None:
+                selected[product_key] = product_data
+                continue
+
+            existing_expiry = parse_expiry(
+                existing.get("expiry_date")
+            )
+
+            # Prefer the row with the earliest valid expiry.
+            # If either expiry is missing, prefer the row that has a valid
+            # expiry. If both are missing/equal, use the lower database id.
+            replace_existing = False
+
+            if existing_expiry is None and expiry is not None:
+                replace_existing = True
+            elif existing_expiry is not None and expiry is not None:
+                if expiry < existing_expiry:
+                    replace_existing = True
+                elif (
+                    expiry == existing_expiry
+                    and int(product_data.get("id") or 0)
+                    < int(existing.get("id") or 0)
+                ):
+                    replace_existing = True
+            elif existing_expiry is None and expiry is None:
+                if (
+                    int(product_data.get("id") or 0)
+                    < int(existing.get("id") or 0)
+                ):
+                    replace_existing = True
+
+            if replace_existing:
+                selected[product_key] = product_data
+
+    # Sort the selected database rows BEFORE converting them to the
+    # customer-facing response, because is_admin_added is an internal field.
+    #
+    # Admin-added products come first. Imported products then retain the
+    # original database/dataset order (ascending database id).
+    # There is intentionally no alphabetical sorting here.
+    ordered_products = sorted(
+        selected.values(),
+        key=lambda product_data: (
+            0 if int(product_data.get("is_admin_added") or 0) == 1 else 1,
+            int(product_data.get("id") or 0),
+        )
+    )
 
     customer_products = [
         _customer_product(product_data)
-        for product_data in selected.values()
+        for product_data in ordered_products
     ]
-
-    customer_products.sort(
-        key=lambda item: (
-            str(item.get("product_name") or "").casefold(),
-            normalize_category(item.get("category")),
-            int(item.get("id") or 0),
-        )
-    )
 
     total = len(customer_products)
 
@@ -1141,7 +1411,8 @@ def update_product(
             waste_risk = ?,
             recommended_discount = ?,
             final_price = ?,
-            image_data = ?
+            image_data = ?,
+            product_images = ?
         WHERE id = ?
     """, (
         product.product_name,
@@ -1171,6 +1442,11 @@ def update_product(
             "final_price"
         ),
         product.image_data,
+        json.dumps(
+            product.images
+            if product.images is not None
+            else ([product.image_data] if product.image_data else [])
+        ),
         product_id
     ))
 
@@ -1473,6 +1749,14 @@ def purchase_product(
             + purchase.quantity
         )
 
+        # Recalculate demand metrics from actual purchases. The retailer
+        # never has to manually enter these values.
+        derived_metrics = _derive_sales_metrics(
+            product["stock_date"],
+            product["expiry_date"],
+            new_historical_sales,
+        )
+
         ml_input = {
 
             "Product_Name":
@@ -1497,16 +1781,16 @@ def purchase_product(
                 product["selling_price"],
 
             "Demand_Rate":
-                product["demand_rate"],
+                derived_metrics["demand_rate"],
 
             "Sales_Velocity":
-                product["sales_velocity"],
+                derived_metrics["sales_velocity"],
 
             "Days_Left":
                 product["days_left"],
 
             "Expected_Demand":
-                product["expected_demand"]
+                derived_metrics["expected_demand"]
         }
 
         prediction = predict_price(
@@ -1536,6 +1820,9 @@ def purchase_product(
             SET
                 current_stock = ?,
                 historical_sales = ?,
+                demand_rate = ?,
+                sales_velocity = ?,
+                expected_demand = ?,
                 prediction = ?,
                 waste_risk = ?,
                 recommended_discount = ?,
@@ -1544,6 +1831,9 @@ def purchase_product(
         """, (
             new_stock,
             new_historical_sales,
+            derived_metrics["demand_rate"],
+            derived_metrics["sales_velocity"],
+            derived_metrics["expected_demand"],
             prediction_json,
             prediction.get(
                 "waste_risk_category"
