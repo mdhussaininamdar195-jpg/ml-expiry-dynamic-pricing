@@ -28,24 +28,6 @@ function fileToDataUrl(file) {
   });
 }
 
-function ImageIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <circle cx="8.5" cy="9" r="1.5" />
-      <path d="m4 17 5-5 3.5 3.5 2.5-2.5 5 5" />
-    </svg>
-  );
-}
-
 function calculateDaysLeft(stockDate, expiryDate) {
   if (!stockDate || !expiryDate) {
     return 0;
@@ -68,13 +50,9 @@ function AddProduct({ onBack, onSave }) {
     expiryDate: "",
     price: "",
     stock: "",
-    historicalSales: "",
-    demandRate: "",
-    salesVelocity: "",
-    expectedDemand: "",
   });
 
-  const [imagePreview, setImagePreview] = useState(null);
+  const [imagePreviews, setImagePreviews] = useState([]);
   const [imageInputKey, setImageInputKey] = useState(0);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -94,32 +72,61 @@ function AddProduct({ onBack, onSave }) {
   }
 
   async function handleImageChange(event) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
 
-    if (!file) {
+    if (!files.length) {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError("Image must be 2 MB or smaller.");
+    const remainingSlots = 3 - imagePreviews.length;
+
+    if (remainingSlots <= 0) {
+      setError("You can add up to 3 product images.");
+      setImageInputKey((current) => current + 1);
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remainingSlots);
+
+    if (files.length > remainingSlots) {
+      setError("Only 3 product images are allowed.");
+    } else {
+      setError("");
+    }
+
+    const oversized = selectedFiles.find(
+      (file) => file.size > 2 * 1024 * 1024
+    );
+
+    if (oversized) {
+      setError("Each image must be 2 MB or smaller.");
       setImageInputKey((current) => current + 1);
       return;
     }
 
     try {
-      const imageData = await fileToDataUrl(file);
-      setImagePreview(imageData);
-      setError("");
+      const imageData = await Promise.all(
+        selectedFiles.map((file) => fileToDataUrl(file))
+      );
+
+      setImagePreviews((current) => [
+        ...current,
+        ...imageData,
+      ].slice(0, 3));
+
+      setImageInputKey((current) => current + 1);
     } catch (err) {
       setError(
-        err.message || "Could not load the selected image."
+        err.message || "Could not load the selected image(s)."
       );
       setImageInputKey((current) => current + 1);
     }
   }
 
-  function handleRemoveImage() {
-    setImagePreview(null);
+  function handleRemoveImage(index) {
+    setImagePreviews((current) =>
+      current.filter((_, imageIndex) => imageIndex !== index)
+    );
     setImageInputKey((current) => current + 1);
   }
 
@@ -145,10 +152,6 @@ function AddProduct({ onBack, onSave }) {
 
     const sellingPrice = Number(formData.price);
     const currentStock = Number(formData.stock);
-    const historicalSales = Number(formData.historicalSales);
-    const demandRate = Number(formData.demandRate);
-    const salesVelocity = Number(formData.salesVelocity);
-    const expectedDemand = Number(formData.expectedDemand);
 
     if (sellingPrice <= 0) {
       setError("Selling price must be greater than 0.");
@@ -157,26 +160,6 @@ function AddProduct({ onBack, onSave }) {
 
     if (currentStock < 0) {
       setError("Current stock cannot be negative.");
-      return;
-    }
-
-    if (historicalSales < 0) {
-      setError("Historical sales cannot be negative.");
-      return;
-    }
-
-    if (demandRate < 0) {
-      setError("Demand rate cannot be negative.");
-      return;
-    }
-
-    if (salesVelocity < 0) {
-      setError("Sales velocity cannot be negative.");
-      return;
-    }
-
-    if (expectedDemand < 0) {
-      setError("Expected demand cannot be negative.");
       return;
     }
 
@@ -192,13 +175,16 @@ function AddProduct({ onBack, onSave }) {
         stock_date: formData.stockDate,
         expiry_date: formData.expiryDate,
         current_stock: currentStock,
-        historical_sales: historicalSales,
+        // A brand-new product has no sales history yet.
+        // The backend initializes derived demand metrics automatically.
+        historical_sales: 0,
         selling_price: Number(sellingPrice.toFixed(2)),
-        demand_rate: demandRate,
-        sales_velocity: salesVelocity,
+        demand_rate: 0,
+        sales_velocity: 0,
         days_left: daysLeft,
-        expected_demand: expectedDemand,
-        image_data: imagePreview || null,
+        expected_demand: 0,
+        image_data: imagePreviews[0] || null,
+        images: imagePreviews,
       };
 
       const response = await apiRequest("/products", {
@@ -228,14 +214,15 @@ function AddProduct({ onBack, onSave }) {
 
         stockDate: productData.stock_date,
         expiryDate: productData.expiry_date,
-        historicalSales: productData.historical_sales,
-        demandRate: productData.demand_rate,
-        salesVelocity: productData.sales_velocity,
-        expectedDemand: productData.expected_demand,
+        historicalSales: response.historical_sales ?? 0,
+        demandRate: response.demand_rate ?? 0,
+        salesVelocity: response.sales_velocity ?? 0,
+        expectedDemand: response.expected_demand ?? 0,
         productFamily: productData.product_family,
 
-        imagePreview,
-        imageData: imagePreview,
+        imagePreview: imagePreviews[0] || null,
+        imageData: imagePreviews[0] || null,
+        images: imagePreviews,
       };
 
       if (onSave) {
@@ -287,7 +274,8 @@ function AddProduct({ onBack, onSave }) {
             <h2>Product information</h2>
 
             <p>
-              Enter the information required by the pricing model.
+              Enter the product and inventory information you know. Sales and
+              demand metrics are initialized automatically.
             </p>
           </div>
 
@@ -403,65 +391,6 @@ function AddProduct({ onBack, onSave }) {
               />
             </label>
 
-            <label className="form-field">
-              <span>Historical sales</span>
-
-              <input
-                type="number"
-                name="historicalSales"
-                value={formData.historicalSales}
-                onChange={handleChange}
-                min="0"
-                step="1"
-                placeholder="Example: 120"
-                required
-              />
-            </label>
-
-            <label className="form-field">
-              <span>Demand rate</span>
-
-              <input
-                type="number"
-                name="demandRate"
-                value={formData.demandRate}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
-                placeholder="Example: 4.5"
-                required
-              />
-            </label>
-
-            <label className="form-field">
-              <span>Sales velocity</span>
-
-              <input
-                type="number"
-                name="salesVelocity"
-                value={formData.salesVelocity}
-                onChange={handleChange}
-                min="0"
-                step="1"
-                placeholder="Example: 5"
-                required
-              />
-            </label>
-
-            <label className="form-field">
-              <span>Expected demand</span>
-
-              <input
-                type="number"
-                name="expectedDemand"
-                value={formData.expectedDemand}
-                onChange={handleChange}
-                min="0"
-                step="1"
-                placeholder="Example: 40"
-                required
-              />
-            </label>
           </div>
 
           {error && (
@@ -480,49 +409,92 @@ function AddProduct({ onBack, onSave }) {
             </p>
           </div>
 
-          <div className="image-upload-area">
-            <div className="image-preview">
-              {imagePreview ? (
-                <img
-                  src={imagePreview}
-                  alt="Product preview"
-                />
-              ) : (
-                <ImageIcon />
-              )}
+          <div className="image-upload-area image-upload-gallery-area">
+            <div className="image-slot-grid">
+              {[0, 1, 2].map((slotIndex) => {
+                const image = imagePreviews[slotIndex];
+                const isFirst = slotIndex === 0;
+
+                return (
+                  <div
+                    className={`image-slot ${image ? "has-image" : "empty"}`}
+                    key={slotIndex}
+                  >
+                    {image ? (
+                      <>
+                        <img
+                          src={image}
+                          alt={`Product image ${slotIndex + 1}`}
+                        />
+
+                        {isFirst && (
+                          <span className="image-slot-main">Main image</span>
+                        )}
+
+                        <button
+                          type="button"
+                          className="image-slot-remove"
+                          onClick={() => handleRemoveImage(slotIndex)}
+                          disabled={isSaving}
+                          aria-label={`Remove product image ${slotIndex + 1}`}
+                        >
+                          ×
+                        </button>
+                      </>
+                    ) : (
+                      <label className="image-slot-add">
+                        <span className="image-slot-plus">+</span>
+                        <strong>{isFirst ? "Add image" : "Add another image"}</strong>
+                        <small>Image {slotIndex + 1} of 3</small>
+                        <input
+                          key={`${imageInputKey}-${slotIndex}`}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={handleImageChange}
+                          disabled={isSaving}
+                        />
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="image-upload-content">
-              <strong>Product image</strong>
+            <div className="image-upload-content image-gallery-help">
+              <strong>Product images</strong>
 
               <span>
-                JPG, PNG or WebP. Image preview is available
-                locally for now.
+                Add up to 3 images for the same product. Use the same product
+                across all three slots; customers can slide through them after
+                opening the product. JPG, PNG or WebP, up to 2 MB each.
               </span>
 
-              <div className="image-actions">
-                <label className="upload-button">
-                  Choose image
-
+              {imagePreviews.length < 3 && (
+                <label className="add-another-image-button">
+                  + Add another image
                   <input
-                    key={imageInputKey}
+                    key={`additional-${imageInputKey}`}
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     onChange={handleImageChange}
+                    disabled={isSaving}
                   />
                 </label>
+              )}
 
-                {imagePreview && (
-                  <button
-                    type="button"
-                    className="remove-image-button"
-                    onClick={handleRemoveImage}
-                    disabled={isSaving}
-                  >
-                    Remove image
-                  </button>
-                )}
-              </div>
+              {imagePreviews.length > 0 && (
+                <button
+                  type="button"
+                  className="remove-image-button"
+                  onClick={() => {
+                    setImagePreviews([]);
+                    setImageInputKey((current) => current + 1);
+                  }}
+                  disabled={isSaving}
+                >
+                  Remove all images
+                </button>
+              )}
             </div>
           </div>
         </section>

@@ -220,6 +220,8 @@ function CustomerHome() {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [purchaseError, setPurchaseError] = useState("");
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [detailImageIndex, setDetailImageIndex] = useState(0);
   const requestIdRef = useRef(0);
 
   const PAGE_SIZE = 20;
@@ -304,7 +306,15 @@ function CustomerHome() {
               finalPrice < originalPrice,
             status,
             stock: Number(product.current_stock ?? 0),
+            shelfLifeDays: Number.isFinite(Number(product.shelf_life_days))
+              ? Number(product.shelf_life_days)
+              : null,
             imageData: product.image_data ?? null,
+            images: Array.isArray(product.images)
+              ? product.images.filter(Boolean)
+              : product.image_data
+                ? [product.image_data]
+                : [],
           };
         });
 
@@ -381,17 +391,97 @@ function CustomerHome() {
 
   const pageNumbers = getPageNumbers(currentPage, totalPages);
 
+  function openProductDetails(product) {
+    setSelectedProduct(product);
+    setDetailImageIndex(0);
+  }
+
+  function closeProductDetails() {
+    setSelectedProduct(null);
+    setDetailImageIndex(0);
+  }
+
+  function getProductImages(product) {
+    if (!product) return [];
+    if (Array.isArray(product.images) && product.images.length > 0) return product.images;
+    return product.imageData ? [product.imageData] : [];
+  }
+
+  function getCartQuantity(productId) {
+    const item = cartItems.find((cartItem) => cartItem.id === productId);
+    return item ? Number(item.quantity ?? 1) : 0;
+  }
+
   function handleBuy(product) {
-    if (Number(product.stock ?? 0) <= 0) {
+    const stock = Number(product.stock ?? 0);
+
+    if (stock <= 0) {
       return;
     }
+
     setCartItems((currentItems) => {
-      if (currentItems.some((item) => item.id === product.id)) {
+      const existingItem = currentItems.find(
+        (item) => item.id === product.id
+      );
+
+      if (existingItem) {
+        const nextQuantity = Math.min(
+          Number(existingItem.quantity ?? 1) + 1,
+          stock
+        );
+
+        return currentItems.map((item) =>
+          item.id === product.id
+            ? { ...item, quantity: nextQuantity }
+            : item
+        );
+      }
+
+      return [...currentItems, { ...product, quantity: 1 }];
+    });
+  }
+
+  function handleBuyNow(product) {
+    const stock = Number(product.stock ?? 0);
+
+    if (stock <= 0) {
+      return;
+    }
+
+    setCartItems((currentItems) => {
+      const existingItem = currentItems.find(
+        (item) => item.id === product.id
+      );
+
+      if (existingItem) {
         return currentItems;
       }
 
-      return [...currentItems, product];
+      return [...currentItems, { ...product, quantity: 1 }];
     });
+
+    setIsCartOpen(true);
+  }
+
+  function updateCartQuantity(product, nextQuantity) {
+    const stock = Number(product.stock ?? 0);
+    const safeQuantity = Math.max(
+      0,
+      Math.min(Number(nextQuantity) || 0, stock)
+    );
+
+    if (safeQuantity === 0) {
+      handleRemove(product.id);
+      return;
+    }
+
+    setCartItems((currentItems) =>
+      currentItems.map((item) =>
+        item.id === product.id
+          ? { ...item, quantity: safeQuantity }
+          : item
+      )
+    );
   }
 
   function handleRemove(productId) {
@@ -412,11 +502,13 @@ function CustomerHome() {
       const purchaseResults = [];
 
       for (const product of cartItems) {
+        const quantity = Number(product.quantity ?? 1);
+
         const response = await apiRequest(
           `/products/${product.id}/purchase`,
           {
             method: "POST",
-            body: JSON.stringify({ quantity: 1 }),
+            body: JSON.stringify({ quantity }),
           }
         );
 
@@ -433,9 +525,6 @@ function CustomerHome() {
       setCartItems([]);
       setIsCartOpen(false);
       setPurchaseComplete(true);
-
-      // Reload the same page so stock and the newly recalculated
-      // ML price are visible immediately.
       setRefreshVersion((current) => current + 1);
     } catch (error) {
       console.error("Failed to complete purchase:", error);
@@ -449,7 +538,16 @@ function CustomerHome() {
   }
 
   const cartTotal = cartItems.reduce(
-    (total, product) => total + product.price,
+    (total, product) =>
+      total +
+      Number(product.price ?? 0) *
+        Number(product.quantity ?? 1),
+    0
+  );
+
+  const cartItemCount = cartItems.reduce(
+    (total, product) =>
+      total + Number(product.quantity ?? 1),
     0
   );
 
@@ -489,37 +587,9 @@ function CustomerHome() {
             <span>Shopping from</span>
             <strong>Nearby Store</strong>
           </div>
-
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m7 10 5 5 5-5" />
-          </svg>
         </div>
 
         <div className="customer-actions">
-          <button
-            className="customer-icon-button"
-            aria-label="Search"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="m16 16 4 4" />
-            </svg>
-          </button>
 
           <button
             className="cart-button"
@@ -527,7 +597,7 @@ function CustomerHome() {
             onClick={() => setIsCartOpen(true)}
           >
             <CartIcon />
-            <span>{cartItems.length}</span>
+            <span>{cartItemCount}</span>
           </button>
         </div>
       </header>
@@ -628,83 +698,374 @@ function CustomerHome() {
           {!loading && !loadError && (
             <div className="customer-product-grid">
               {products.map((product) => {
-              const isAdded = cartItems.some(
-                (item) => item.id === product.id
-              );
+                const quantity = getCartQuantity(product.id);
+                const stock = Number(product.stock ?? 0);
+                const isLowStock = stock > 0 && stock < 5;
+                const isExpanded = selectedProduct?.id === product.id;
 
-              return (
-                <article
-                  className="customer-product-card"
-                  key={product.id}
-                >
-                  <div className="product-image">
-                    {product.imageData ? (
-                      <img
-                        src={product.imageData}
-                        alt={product.name}
-                      />
+                const productImages = getProductImages(product);
+                const activeProductImage =
+                  productImages[detailImageIndex] || productImages[0];
+
+                const shelfLifeText =
+                  product.shelfLifeDays != null &&
+                  product.shelfLifeDays >= 0
+                    ? `${product.shelfLifeDays} days shelf life`
+                    : "";
+
+                return (
+                  <article
+                    className={`customer-product-card ${isExpanded ? "is-expanded" : ""}`}
+                    key={product.id}
+                    onClick={() => {
+                      if (isExpanded) {
+                        closeProductDetails();
+                      } else {
+                        openProductDetails(product);
+                      }
+                    }}
+                  >
+                    {!isExpanded ? (
+                      <>
+                        <div className="product-image">
+                          {product.imageData ? (
+                            <img
+                              src={product.imageData}
+                              alt={product.name}
+                            />
+                          ) : (
+                            <ProductIcon category={product.category} />
+                          )}
+                        </div>
+
+                        <div className="customer-product-content">
+                          <div className="product-meta">
+                            <span>
+                              {String(product.category || "Unknown")
+                                .replace(/[_-]+/g, " ")}
+                            </span>
+                          </div>
+
+                          <h3 title={product.name}>{product.name}</h3>
+
+                          {product.status && (
+                            <span
+                              className={`product-status ${
+                                product.status === "Reduced price"
+                                  ? "reduced"
+                                  : product.status === "Small saving"
+                                    ? "small-saving"
+                                    : product.status === "Great deal"
+                                      ? "strong-deal"
+                                      : ""
+                              }`}
+                            >
+                              {product.status}
+                            </span>
+                          )}
+
+                          {isLowStock && (
+                            <span className="low-stock-badge">
+                              Only {stock} left
+                            </span>
+                          )}
+
+                          <div className="product-purchase-row">
+                            <div className="product-price">
+                              <strong>
+                                ₹{Number(product.price).toFixed(2)}
+                              </strong>
+
+                              {product.isDiscounted && (
+                                <del>
+                                  ₹{Number(product.originalPrice).toFixed(2)}
+                                </del>
+                              )}
+                            </div>
+
+                            {quantity > 0 ? (
+                              <div
+                                className="quantity-control"
+                                aria-label={`Quantity for ${product.name}`}
+                              >
+                                <button
+                                  type="button"
+                                  className="quantity-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    updateCartQuantity(product, quantity - 1);
+                                  }}
+                                  aria-label={`Decrease ${product.name} quantity`}
+                                >
+                                  −
+                                </button>
+
+                                <span className="quantity-value">
+                                  {quantity}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  className="quantity-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    updateCartQuantity(product, quantity + 1);
+                                  }}
+                                  disabled={quantity >= stock}
+                                  aria-label={`Increase ${product.name} quantity`}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="buy-button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleBuy(product);
+                                }}
+                                disabled={stock <= 0}
+                              >
+                                {stock <= 0 ? "Out of stock" : "Add"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </>
                     ) : (
-                      <ProductIcon category={product.category} />
-                    )}
-                  </div>
-
-                  <div className="customer-product-content">
-                    <div className="product-meta">
-                      <span>
-                        {String(product.category || "Unknown")
-                          .replace(/[_-]+/g, " ")}
-                      </span>
-
-                    </div>
-
-                    <h3>{product.name}</h3>
-
-                    {product.status && (
-                      <span
-                        className={`product-status ${
-                          product.status === "Reduced price"
-                            ? "reduced"
-                            : product.status === "Small saving"
-                              ? "small-saving"
-                              : product.status === "Great deal"
-                                ? "strong-deal"
-                                : ""
-                        }`}
+                      <div
+                        className="product-expanded-panel"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        {product.status}
-                      </span>
-                    )}
+                        <div className="product-expanded-gallery">
+                          <div className="product-expanded-main-image">
+                            {activeProductImage ? (
+                              <img
+                                src={activeProductImage}
+                                alt={product.name}
+                              />
+                            ) : (
+                              <ProductIcon category={product.category} />
+                            )}
 
-                    <div className="product-purchase-row">
-                      <div className="product-price">
-                        <strong>
-                          ₹{Number(product.price).toFixed(2)}
-                        </strong>
+                            {productImages.length > 1 && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="gallery-arrow gallery-arrow-left"
+                                  onClick={() =>
+                                    setDetailImageIndex((index) =>
+                                      index === 0
+                                        ? productImages.length - 1
+                                        : index - 1
+                                    )
+                                  }
+                                  aria-label="Previous product image"
+                                >
+                                  ‹
+                                </button>
 
-                        {product.isDiscounted && (
-                          <del>
-                            ₹{Number(product.originalPrice).toFixed(2)}
-                          </del>
-                        )}
+                                <button
+                                  type="button"
+                                  className="gallery-arrow gallery-arrow-right"
+                                  onClick={() =>
+                                    setDetailImageIndex(
+                                      (index) =>
+                                        (index + 1) % productImages.length
+                                    )
+                                  }
+                                  aria-label="Next product image"
+                                >
+                                  ›
+                                </button>
+                              </>
+                            )}
+
+                            {productImages.length > 1 && (
+                              <div className="product-image-slide-dots">
+                                {productImages.map((_, index) => (
+                                  <button
+                                    key={index}
+                                    type="button"
+                                    className={
+                                      index === detailImageIndex
+                                        ? "active"
+                                        : ""
+                                    }
+                                    onClick={() => setDetailImageIndex(index)}
+                                    aria-label={`Show product image ${index + 1}`}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {productImages.length > 1 && (
+                            <div className="product-detail-thumbnails">
+                              {productImages.map((image, index) => (
+                                <button
+                                  type="button"
+                                  key={`${image}-${index}`}
+                                  className={`product-detail-thumbnail ${
+                                    index === detailImageIndex ? "active" : ""
+                                  }`}
+                                  onClick={() => setDetailImageIndex(index)}
+                                  aria-label={`View product image ${index + 1}`}
+                                >
+                                  <img src={image} alt="" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="product-expanded-content">
+                          <div className="product-expanded-heading">
+                            <div>
+                              <span className="product-expanded-category">
+                                {String(product.category || "Unknown")
+                                  .replace(/[_-]+/g, " ")}
+                              </span>
+
+                              <h4>{product.name}</h4>
+
+                              {product.status && (
+                                <span
+                                  className={`product-status product-expanded-status ${
+                                    product.status === "Reduced price"
+                                      ? "reduced"
+                                      : product.status === "Small saving"
+                                        ? "small-saving"
+                                        : product.status === "Great deal"
+                                          ? "strong-deal"
+                                          : ""
+                                  }`}
+                                >
+                                  {product.status}
+                                </span>
+                              )}
+
+                              {shelfLifeText && (
+                                <span className="product-expanded-shelf-life">
+                                  <span className="shelf-life-dot" aria-hidden="true" />
+                                  {shelfLifeText}
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              className="product-expanded-close"
+                              onClick={closeProductDetails}
+                              aria-label="Close product details"
+                            >
+                              <CloseIcon />
+                            </button>
+                          </div>
+
+                          <div className="product-expanded-price-row">
+                            <strong>
+                              ₹{Number(product.price).toFixed(2)}
+                            </strong>
+
+                            {product.isDiscounted && (
+                              <del>
+                                ₹{Number(product.originalPrice).toFixed(2)}
+                              </del>
+                            )}
+
+                            {product.recommendedDiscount > 0 && (
+                              <span className="product-expanded-saving">
+                                Save{" "}
+                                {Number(product.recommendedDiscount).toFixed(0)}
+                                %
+                              </span>
+                            )}
+                          </div>
+
+                          {product.recommendedDiscount > 0 && (
+                            <div className="product-expanded-offer">
+                              <span>Deal</span>
+                              <strong>
+                                {Number(product.recommendedDiscount).toFixed(0)}%
+                                saving
+                              </strong>
+                            </div>
+                          )}
+
+                          {isLowStock && (
+                            <div className="product-expanded-stock-note">
+                              Only {stock} units left
+                            </div>
+                          )}
+
+                          <p className="product-expanded-description">
+                            FreshFlow adjusts prices based on inventory and
+                            freshness, helping you save while reducing
+                            unnecessary food waste.
+                          </p>
+
+                          <div className="product-expanded-actions">
+                            {quantity > 0 ? (
+                              <>
+                                <div
+                                  className="quantity-control product-expanded-quantity"
+                                  aria-label={`Quantity for ${product.name}`}
+                                >
+                                  <button
+                                    type="button"
+                                    className="quantity-button"
+                                    onClick={() =>
+                                      updateCartQuantity(product, quantity - 1)
+                                    }
+                                    aria-label={`Decrease ${product.name} quantity`}
+                                  >
+                                    −
+                                  </button>
+
+                                  <span className="quantity-value">
+                                    {quantity}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    className="quantity-button"
+                                    onClick={() =>
+                                      updateCartQuantity(product, quantity + 1)
+                                    }
+                                    disabled={quantity >= stock}
+                                    aria-label={`Increase ${product.name} quantity`}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  className="product-detail-buy-now-button"
+                                  disabled={stock <= 0}
+                                  onClick={() => handleBuyNow(product)}
+                                >
+                                  Buy Now
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="product-detail-add-button product-expanded-cart-button"
+                                disabled={stock <= 0}
+                                onClick={() => handleBuy(product)}
+                              >
+                                {stock <= 0 ? "Out of stock" : "Add to cart"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-
-                      <button
-                        className={`buy-button ${
-                          isAdded ? "added" : ""
-                        }`}
-                        onClick={() => handleBuy(product)}
-                        disabled={isAdded || Number(product.stock ?? 0) <= 0}
-                      >
-                        {isAdded
-                          ? "Added"
-                          : Number(product.stock ?? 0) <= 0
-                            ? "Out of stock"
-                            : "Buy"}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
+                    )}
+                  </article>
+                );
               })}
             </div>
           )}
@@ -806,43 +1167,85 @@ function CustomerHome() {
             ) : (
               <>
                 <div className="cart-items">
-                  {cartItems.map((product) => (
-                    <div
-                      className="cart-item"
-                      key={product.id}
-                    >
-                      <div className="cart-item-image">
-                        <ProductIcon
-                          category={product.category}
-                        />
-                      </div>
+                  {cartItems.map((product) => {
+                    const quantity = Number(product.quantity ?? 1);
+                    const stock = Number(product.stock ?? 0);
+                    const lineTotal =
+                      Number(product.price ?? 0) * quantity;
 
-                      <div className="cart-item-content">
-                        <strong>{product.name}</strong>
+                    return (
+                      <div className="cart-item" key={product.id}>
+                        <div className="cart-item-image">
+                          {product.imageData ? (
+                            <img
+                              src={product.imageData}
+                              alt={product.name}
+                            />
+                          ) : (
+                            <ProductIcon category={product.category} />
+                          )}
+                        </div>
 
-                        <span>
-                          {String(product.category || "Unknown")
-                          .replace(/[_-]+/g, " ")}
-                        </span>
+                        <div className="cart-item-content">
+                          <strong title={product.name}>
+                            {product.name}
+                          </strong>
 
-                        <div className="cart-item-bottom">
-                          <span className="cart-item-price">
-                            ₹{Number(product.price).toFixed(2)}
+                          <span>
+                            {String(product.category || "Unknown")
+                              .replace(/[_-]+/g, " ")}
                           </span>
 
-                          <button
-                            type="button"
-                            className="cart-remove-button"
-                            onClick={() =>
-                              handleRemove(product.id)
-                            }
-                          >
-                            Remove
-                          </button>
+                          <div className="cart-item-middle">
+                            <span className="cart-item-price">
+                              ₹{lineTotal.toFixed(2)}
+                            </span>
+
+                            <div className="quantity-control cart-quantity-control">
+                              <button
+                                type="button"
+                                className="quantity-button"
+                                onClick={() =>
+                                  updateCartQuantity(product, quantity - 1)
+                                }
+                              >
+                                −
+                              </button>
+
+                              <span className="quantity-value">
+                                {quantity}
+                              </span>
+
+                              <button
+                                type="button"
+                                className="quantity-button"
+                                onClick={() =>
+                                  updateCartQuantity(product, quantity + 1)
+                                }
+                                disabled={quantity >= stock}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="cart-item-bottom">
+                            <span className="cart-item-unit-price">
+                              ₹{Number(product.price).toFixed(2)} each
+                            </span>
+
+                            <button
+                              type="button"
+                              className="cart-remove-button"
+                              onClick={() => handleRemove(product.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="cart-footer">
