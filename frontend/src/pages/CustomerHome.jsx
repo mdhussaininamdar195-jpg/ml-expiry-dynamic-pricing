@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./CustomerHome.css";
+
 import { apiRequest } from "../services/api";
 
 const categories = [
@@ -203,7 +205,27 @@ function getPageNumbers(currentPage, totalPages) {
   return pages;
 }
 
+function UserIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.2" />
+      <path d="M5.5 20c.8-3.6 3-5.4 6.5-5.4s5.7 1.8 6.5 5.4" />
+    </svg>
+  );
+}
+
+function CategoryArrow({ direction = "right" }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {direction === "left" ? <path d="m15 18-6-6 6-6" /> : <path d="m9 18 6-6-6-6" />}
+    </svg>
+  );
+}
+
 function CustomerHome() {
+  const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState([]);
@@ -211,6 +233,7 @@ function CustomerHome() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [purchaseComplete, setPurchaseComplete] = useState(false);
   const [lastPurchaseTotal, setLastPurchaseTotal] = useState(0);
+  const [showSplash, setShowSplash] = useState(true);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
@@ -223,8 +246,17 @@ function CustomerHome() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [detailImageIndex, setDetailImageIndex] = useState(0);
   const requestIdRef = useRef(0);
+  const categoryListRef = useRef(null);
 
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("dailycart_theme");
+    document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+
+    const timer = window.setTimeout(() => setShowSplash(false), 850);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -495,6 +527,11 @@ function CustomerHome() {
       return;
     }
 
+    if (!localStorage.getItem("access_token")) {
+      navigate("/login", { state: { from: "/customer" } });
+      return;
+    }
+
     setPurchaseError("");
     setIsPurchasing(true);
 
@@ -551,32 +588,28 @@ function CustomerHome() {
     0
   );
 
+  function scrollCategories(direction) {
+    categoryListRef.current?.scrollBy({
+      left: direction === "left" ? -260 : 260,
+      behavior: "smooth",
+    });
+  }
+
   return (
-    <div className="customer-page">
+    <>
+      {showSplash && (
+        <div className="dailycart-splash" aria-label="Opening DailyCart">
+          <div className="dailycart-splash-logo">D</div>
+          <strong>DailyCart</strong>
+          <span>Smart groceries, better value.</span>
+        </div>
+      )}
+      <div className="customer-page">
       <header className="customer-header">
         <div className="customer-brand">
-          <div className="customer-brand-mark">
-            <svg
-              viewBox="0 0 32 32"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M16 4c-5.8 2.2-9 6.1-9 11.3C7 21.2 10.8 26 16 28c5.2-2 9-6.8 9-12.7C25 10.1 21.8 6.2 16 4Z"
-                fill="currentColor"
-              />
-              <path
-                d="M16 8c-.2 5.6-.1 11.6 0 16"
-                stroke="white"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
-
           <div>
-            <strong>FreshFlow</strong>
-            <span>Local groceries</span>
+            <strong>DailyCart</strong>
+            <span>Smart groceries, better value.</span>
           </div>
         </div>
 
@@ -590,6 +623,14 @@ function CustomerHome() {
         </div>
 
         <div className="customer-actions">
+          <button
+            type="button"
+            className="dailycart-profile-button"
+            onClick={() => navigate(localStorage.getItem("access_token") ? "/account" : "/login")}
+            aria-label={localStorage.getItem("access_token") ? "Open account settings" : "Login"}
+          >
+            {localStorage.getItem("access_token") ? <UserIcon /> : "Login"}
+          </button>
 
           <button
             className="cart-button"
@@ -606,7 +647,7 @@ function CustomerHome() {
         <section className="customer-intro">
           <div>
             <span className="customer-eyebrow">
-              FreshFlow Market
+              DailyCart
             </span>
 
             <h1>Good groceries, better value.</h1>
@@ -644,24 +685,42 @@ function CustomerHome() {
             />
           </div>
 
-          <div className="category-list">
-            {categories.map((category) => (
-              <button
-                type="button"
-                key={category.value}
-                className={`category-button ${
-                  selectedCategory === category.value
-                    ? "selected"
-                    : ""
-                }`}
-                onClick={() => {
-                  setCurrentPage(1);
-                  setSelectedCategory(category.value);
-                }}
-              >
-                {category.label}
-              </button>
-            ))}
+          <div className="category-scroller">
+            <button
+              type="button"
+              className="category-scroll-button category-scroll-left"
+              onClick={() => scrollCategories("left")}
+              aria-label="Scroll categories left"
+            >
+              <CategoryArrow direction="left" />
+            </button>
+
+            <div className="category-list" ref={categoryListRef}>
+              {categories.map((category) => (
+                <button
+                  type="button"
+                  key={category.value}
+                  className={`category-button ${
+                    selectedCategory === category.value ? "selected" : ""
+                  }`}
+                  onClick={() => {
+                    setCurrentPage(1);
+                    setSelectedCategory(category.value);
+                  }}
+                >
+                  {category.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="category-scroll-button category-scroll-right"
+              onClick={() => scrollCategories("right")}
+              aria-label="Scroll categories right"
+            >
+              <CategoryArrow direction="right" />
+            </button>
           </div>
         </section>
 
@@ -1001,7 +1060,7 @@ function CustomerHome() {
                           )}
 
                           <p className="product-expanded-description">
-                            FreshFlow adjusts prices based on inventory and
+                            DailyCart adjusts prices based on inventory and
                             freshness, helping you save while reducing
                             unnecessary food waste.
                           </p>
@@ -1314,6 +1373,7 @@ function CustomerHome() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

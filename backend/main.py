@@ -1477,7 +1477,8 @@ def update_product(
 @app.post("/products/{product_id}/purchase")
 def purchase_product(
     product_id: int,
-    purchase: PurchaseRequest
+    purchase: PurchaseRequest,
+    current_user: dict = Depends(get_current_user),
 ):
 
     if purchase.quantity <= 0:
@@ -1850,6 +1851,7 @@ def purchase_product(
         cursor.execute("""
             INSERT INTO purchases (
                 product_id,
+                user_id,
                 quantity,
                 price_per_unit,
                 total_amount,
@@ -1862,12 +1864,14 @@ def purchase_product(
                 ?,
                 ?,
                 ?,
+                ?,
                 datetime('now', 'localtime'),
                 ?,
                 ?
             )
         """, (
             product["id"],
+            current_user["id"],
             purchase.quantity,
             current_price,
             total_amount,
@@ -1904,6 +1908,38 @@ def purchase_product(
     finally:
 
         connection.close()
+
+
+# ============================================================
+# CUSTOMER ACCOUNT
+# ============================================================
+
+@app.get("/account")
+def get_account(current_user: dict = Depends(get_current_user)):
+    return {"user": current_user}
+
+
+@app.get("/account/orders")
+def get_account_orders(current_user: dict = Depends(get_current_user)):
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute("""
+        SELECT p.id AS purchase_id, p.product_id, p.quantity,
+               p.price_per_unit, p.total_amount, p.purchased_at,
+               p.days_left_at_purchase, p.waste_risk_at_purchase,
+               pr.product_name, pr.category, pr.image_data
+        FROM purchases p
+        LEFT JOIN products pr ON pr.id = p.product_id
+        WHERE p.user_id = ?
+        ORDER BY p.id DESC
+    """, (current_user["id"],))
+    orders = [dict(row) for row in cursor.fetchall()]
+    connection.close()
+    return {
+        "orders": orders,
+        "total_orders": len(orders),
+        "total_spent": round(sum(float(o.get("total_amount") or 0) for o in orders), 2),
+    }
 
 
 # ============================================================
