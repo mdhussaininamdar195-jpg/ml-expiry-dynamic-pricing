@@ -120,7 +120,7 @@ function AdminNav() {
         </div>
 
         <div>
-          <strong>FreshFlow</strong>
+          <strong>Daily Cart</strong>
           <span>Administration</span>
         </div>
       </div>

@@ -204,7 +204,7 @@ function AdminLogin() {
           <div>
 
             <strong>
-              FreshFlow
+              Daily Cart
             </strong>
 
             <span>
