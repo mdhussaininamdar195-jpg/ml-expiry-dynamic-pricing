@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 import re
+import sqlite3
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -366,7 +367,7 @@ class Product(BaseModel):
 class UserRegister(BaseModel):
 
     username: str
-    email: str | None = None
+    email: str
     password: str
 
 
@@ -511,53 +512,118 @@ def root():
 @app.post("/register")
 def register_user(user: UserRegister):
 
+    username = user.username.strip()
+    email = user.email.strip().lower()
+    password = user.password
+
+    # Basic validation
+    if not username:
+        raise HTTPException(
+            status_code=400,
+            detail="Username is required"
+        )
+
+    if len(username) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be at least 3 characters"
+        )
+
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Email is required"
+        )
+
+    if len(password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters"
+        )
+
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        "SELECT id FROM users WHERE username = ?",
-        (user.username,)
-    )
+    try:
+        cursor = connection.cursor()
 
-    existing_user = cursor.fetchone()
+        # Username is NOT unique.
+        # Only email must be unique.
+        cursor.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE LOWER(email) = LOWER(?)
+            """,
+            (email,)
+        )
 
-    if existing_user:
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=400,
+                detail="Email already registered"
+            )
 
-        connection.close()
+        hashed_password = get_password_hash(password)
+
+        cursor.execute(
+            """
+            INSERT INTO users (
+                username,
+                email,
+                hashed_password,
+                is_active,
+                role
+            )
+            VALUES (?, ?, ?, 1, 'customer')
+            """,
+            (
+                username,
+                email,
+                hashed_password
+            )
+        )
+
+        connection.commit()
+
+        user_id = cursor.lastrowid
+
+        return {
+            "message": "User registered successfully",
+            "user_id": user_id,
+            "username": username,
+            "email": email
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except sqlite3.IntegrityError as e:
+        connection.rollback()
+
+        if "email" in str(e).lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Email already registered"
+            )
 
         raise HTTPException(
             status_code=400,
-            detail="Username already registered"
+            detail="Could not create account"
         )
 
-    hashed_password = get_password_hash(
-        user.password
-    )
+    except Exception as e:
+        connection.rollback()
 
-    cursor.execute("""
-        INSERT INTO users (
-            username,
-            email,
-            hashed_password
+        print("Registration error:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail="Registration failed"
         )
-        VALUES (?, ?, ?)
-    """, (
-        user.username,
-        user.email,
-        hashed_password
-    ))
 
-    connection.commit()
-
-    user_id = cursor.lastrowid
-
-    connection.close()
-
-    return {
-        "message": "User registered successfully",
-        "user_id": user_id,
-        "username": user.username
-    }
+    finally:
+        connection.close()
 
 
 # ============================================================
@@ -569,26 +635,58 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
 
+    # The OAuth2 form field is still named "username" for FastAPI
+    # compatibility, but the user must enter their EMAIL here.
+    login_email = form_data.username.strip().lower()
+
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute("""
-        SELECT id, username, hashed_password, is_active, role
-        FROM users
-        WHERE username = ?
-    """, (
-        form_data.username,
-    ))
+    try:
+        cursor = connection.cursor()
 
-    user = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT id, username, email, hashed_password, is_active, role
+            FROM users
+            WHERE LOWER(email) = LOWER(?)
+            """,
+            (login_email,)
+        )
 
-    connection.close()
+        user = cursor.fetchone()
+
+        # Backward compatibility for an existing admin account that
+        # may not have an email yet. This only works when the username
+        # is unique. Normal users should log in with their email.
+        if user is None:
+            cursor.execute(
+                """
+                SELECT id, username, email, hashed_password, is_active, role
+                FROM users
+                WHERE username = ?
+                """,
+                (form_data.username.strip(),)
+            )
+
+            matching_users = cursor.fetchall()
+
+            if len(matching_users) == 1:
+                user = matching_users[0]
+
+            elif len(matching_users) > 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Multiple accounts use this username. Please login using your email."
+                )
+
+    finally:
+        connection.close()
 
     if user is None:
 
         raise HTTPException(
             status_code=401,
-            detail="Incorrect username or password"
+            detail="Incorrect email or password"
         )
 
     if not verify_password(
@@ -598,7 +696,7 @@ def login(
 
         raise HTTPException(
             status_code=401,
-            detail="Incorrect username or password"
+            detail="Incorrect email or password"
         )
 
     if not user["is_active"]:
@@ -608,9 +706,12 @@ def login(
             detail="Inactive user"
         )
 
+    # IMPORTANT:
+    # JWT stores the unique user ID, NOT the username.
+    # This keeps authentication correct even when usernames are duplicated.
     access_token = create_access_token(
         data={
-            "sub": user["username"]
+            "sub": str(user["id"])
         }
     )
 
