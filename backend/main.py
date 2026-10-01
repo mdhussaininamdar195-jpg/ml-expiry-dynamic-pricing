@@ -2328,139 +2328,72 @@ def dashboard_report_pdf(
     connection = get_connection()
     cursor = connection.cursor()
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM purchases"
-    )
-
-    total_purchases = (
-        cursor.fetchone()[0]
-    )
+    cursor.execute("SELECT COUNT(*) FROM purchases")
+    total_purchases = cursor.fetchone()[0]
 
     cursor.execute("""
-        SELECT COALESCE(
-            SUM(quantity),
-            0
-        )
+        SELECT COALESCE(SUM(quantity), 0)
         FROM purchases
     """)
-
-    total_products_purchased = (
-        cursor.fetchone()[0]
-    )
+    total_products_purchased = cursor.fetchone()[0]
 
     cursor.execute("""
-        SELECT COALESCE(
-            SUM(total_amount),
-            0
-        )
+        SELECT COALESCE(SUM(total_amount), 0)
         FROM purchases
     """)
-
-    total_amount_recouped = float(
-        cursor.fetchone()[0] or 0
-    )
+    total_amount_recouped = float(cursor.fetchone()[0] or 0)
 
     cursor.execute("""
-        SELECT COALESCE(
-            SUM(quantity),
-            0
-        )
+        SELECT COALESCE(SUM(quantity), 0)
         FROM purchases
         WHERE days_left_at_purchase <= 3
     """)
-
-    products_saved_from_waste = (
-        cursor.fetchone()[0]
-    )
+    products_saved_from_waste = cursor.fetchone()[0]
 
     cursor.execute("""
-        SELECT COALESCE(
-            SUM(total_amount),
-            0
-        )
+        SELECT COALESCE(SUM(total_amount), 0)
         FROM purchases
         WHERE days_left_at_purchase <= 3
     """)
-
-    amount_recouped_from_waste = float(
-        cursor.fetchone()[0] or 0
-    )
+    amount_recouped_from_waste = float(cursor.fetchone()[0] or 0)
 
     end_date = datetime.now().date()
-
-    start_date = (
-        end_date
-        - timedelta(days=13)
-    )
+    start_date = end_date - timedelta(days=13)
 
     cursor.execute("""
         SELECT
             DATE(purchased_at, 'localtime'),
-            COALESCE(
-                SUM(total_amount),
-                0
-            ),
-            COALESCE(
-                SUM(quantity),
-                0
-            ),
+            COALESCE(SUM(total_amount), 0),
+            COALESCE(SUM(quantity), 0),
             COALESCE(
                 SUM(
                     CASE
-                        WHEN days_left_at_purchase <= 3
-                        THEN quantity
+                        WHEN days_left_at_purchase <= 3 THEN quantity
                         ELSE 0
                     END
                 ),
                 0
             )
-
         FROM purchases
-
-        WHERE DATE(
-            purchased_at,
-            'localtime'
-        )
-        BETWEEN ? AND ?
-
-        GROUP BY DATE(
-            purchased_at,
-            'localtime'
-        )
-
-        ORDER BY DATE(
-            purchased_at,
-            'localtime'
-        )
-    """, (
-        start_date.isoformat(),
-        end_date.isoformat()
-    ))
+        WHERE DATE(purchased_at, 'localtime') BETWEEN ? AND ?
+        GROUP BY DATE(purchased_at, 'localtime')
+        ORDER BY DATE(purchased_at, 'localtime')
+    """, (start_date.isoformat(), end_date.isoformat()))
 
     rows = cursor.fetchall()
-
     connection.close()
 
     by_date = {
-
         row[0]: {
-            "revenue":
-                float(row[1] or 0),
-
-            "units":
-                int(row[2] or 0),
-
-            "saved_units":
-                int(row[3] or 0),
+            "revenue": float(row[1] or 0),
+            "units": int(row[2] or 0),
+            "saved_units": int(row[3] or 0),
         }
-
         for row in rows
     }
 
     sustainability_rate = (
-        products_saved_from_waste
-        / total_products_purchased
-        * 100
+        products_saved_from_waste / total_products_purchased * 100
         if total_products_purchased > 0
         else 0
     )
@@ -2470,46 +2403,29 @@ def dashboard_report_pdf(
         "Revenue",
         "Units",
         "Saved",
-        "Sustainability"
+        "Sustainability",
     ]]
 
     revenue_points = []
     sustainability_points = []
-
     cumulative = 0.0
 
     for offset in range(14):
-
-        current_date = (
-            start_date
-            + timedelta(days=offset)
-        )
-
+        current_date = start_date + timedelta(days=offset)
         row = by_date.get(
             current_date.isoformat(),
-            {
-                "revenue": 0.0,
-                "units": 0,
-                "saved_units": 0,
-            }
+            {"revenue": 0.0, "units": 0, "saved_units": 0},
         )
 
-        cumulative += (
-            row["revenue"]
-        )
+        cumulative += row["revenue"]
 
         rate = (
-            row["saved_units"]
-            / row["units"]
-            * 100
+            row["saved_units"] / row["units"] * 100
             if row["units"]
             else 0
         )
 
-        label = current_date.strftime(
-            "%d %b"
-        )
-
+        label = current_date.strftime("%d %b")
         report_rows.append([
             label,
             f"Rs. {row['revenue']:,.2f}",
@@ -2518,288 +2434,421 @@ def dashboard_report_pdf(
             f"{rate:.2f}%",
         ])
 
-        revenue_points.append(
-            (
-                offset + 1,
-                cumulative
-            )
-        )
-
-        sustainability_points.append(
-            (
-                offset + 1,
-                rate
-            )
-        )
+        revenue_points.append((offset + 1, cumulative))
+        sustainability_points.append((offset + 1, rate))
 
     buffer = BytesIO()
 
+    # Extra top space is reserved for the branded PDF header.
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
         rightMargin=14 * mm,
         leftMargin=14 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        topMargin=43 * mm,
+        bottomMargin=18 * mm,
+        title="DailyCart Store Performance Report",
+        author="DailyCart",
+        subject="ML-Driven Expiry-Based Dynamic Pricing System for Retail Waste Reduction",
     )
 
     styles = getSampleStyleSheet()
 
+    # ------------------------------------------------------------
+    # PROFESSIONAL DAILYCart PDF PALETTE
+    # ------------------------------------------------------------
+    brand = colors.HexColor("#2f6b45")
+    brand_dark = colors.HexColor("#1f4f32")
+    brand_soft = colors.HexColor("#eaf3ed")
+    ink = colors.HexColor("#18231c")
+    muted = colors.HexColor("#68736c")
+    border = colors.HexColor("#d8e0da")
+    surface = colors.HexColor("#ffffff")
+    surface_soft = colors.HexColor("#f6f8f6")
+    warning = colors.HexColor("#b7791f")
+
     title_style = ParagraphStyle(
-        "DashboardTitle",
+        "DailyCartReportTitle",
         parent=styles["Title"],
+        fontName="Helvetica-Bold",
         fontSize=20,
-        spaceAfter=8,
+        leading=24,
+        textColor=ink,
+        spaceAfter=4,
+        alignment=0,
     )
 
+    subtitle_style = ParagraphStyle(
+        "DailyCartReportSubtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9.5,
+        leading=13,
+        textColor=muted,
+        spaceAfter=12,
+    )
+
+    section_style = ParagraphStyle(
+        "DailyCartSection",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12.5,
+        leading=16,
+        textColor=ink,
+        spaceBefore=4,
+        spaceAfter=7,
+    )
+
+    small_style = ParagraphStyle(
+        "DailyCartSmall",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=muted,
+    )
+
+    # ------------------------------------------------------------
+    # PAGE FRAME / HEADER / FOOTER
+    # ------------------------------------------------------------
+    def draw_page(canvas, document):
+        canvas.saveState()
+        page_width, page_height = A4
+
+        # Fine outer border around every page.
+        canvas.setStrokeColor(border)
+        canvas.setLineWidth(0.8)
+        canvas.roundRect(
+            7 * mm,
+            7 * mm,
+            page_width - 14 * mm,
+            page_height - 14 * mm,
+            3 * mm,
+            stroke=1,
+            fill=0,
+        )
+
+        # Branded header band.
+        header_top = page_height - 7 * mm
+        header_bottom = page_height - 34 * mm
+
+        canvas.setFillColor(brand)
+        canvas.roundRect(
+            7 * mm,
+            header_bottom,
+            page_width - 14 * mm,
+            27 * mm,
+            3 * mm,
+            stroke=0,
+            fill=1,
+        )
+
+        # White inner line gives the header a refined edge.
+        canvas.setStrokeColor(colors.Color(1, 1, 1, alpha=0.20))
+        canvas.setLineWidth(0.6)
+        canvas.line(
+            13 * mm,
+            header_bottom + 5 * mm,
+            page_width - 13 * mm,
+            header_bottom + 5 * mm,
+        )
+
+        # Brand wordmark (no separate logo asset required).
+        canvas.setFillColor(colors.white)
+        canvas.setFont("Helvetica-Bold", 18)
+        canvas.drawString(14 * mm, page_height - 19 * mm, "DailyCart")
+
+        canvas.setFont("Helvetica", 7.7)
+        canvas.drawString(
+            14 * mm,
+            page_height - 25 * mm,
+            "ML-Driven Expiry-Based Dynamic Pricing System for Retail Waste Reduction",
+        )
+
+        # Header metadata on the right.
+        canvas.setFont("Helvetica-Bold", 7.5)
+        canvas.drawRightString(
+            page_width - 14 * mm,
+            page_height - 18 * mm,
+            "STORE ANALYTICS",
+        )
+        canvas.setFont("Helvetica", 7.2)
+        canvas.drawRightString(
+            page_width - 14 * mm,
+            page_height - 24 * mm,
+            datetime.now().strftime("%d %b %Y • %H:%M"),
+        )
+
+        # Footer.
+        footer_y = 11.5 * mm
+        canvas.setStrokeColor(border)
+        canvas.setLineWidth(0.5)
+        canvas.line(
+            14 * mm,
+            footer_y + 4 * mm,
+            page_width - 14 * mm,
+            footer_y + 4 * mm,
+        )
+
+        canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 7.2)
+        canvas.drawString(14 * mm, footer_y, "DailyCart • Store Performance Report")
+        canvas.drawRightString(
+            page_width - 14 * mm,
+            footer_y,
+            f"Page {canvas.getPageNumber()}",
+        )
+
+        canvas.restoreState()
+
+    # ------------------------------------------------------------
+    # REPORT HEADER CONTENT
+    # ------------------------------------------------------------
     story = [
-
-        Paragraph(
-            "FreshFlow Dashboard Report",
-            title_style
-        ),
-
+        Paragraph("Store Performance Report", title_style),
         Paragraph(
             (
-                f"Generated on "
-                f"{datetime.now().strftime('%d %b %Y, %H:%M')}"
+                "ML-Driven Expiry-Based Dynamic Pricing System for Retail Waste Reduction"
+                "<br/>"
+                f"Reporting period: {start_date.strftime('%d %b %Y')} – "
+                f"{end_date.strftime('%d %b %Y')}"
             ),
-            styles["Normal"],
+            subtitle_style,
         ),
+    ]
 
+    # ------------------------------------------------------------
+    # EXECUTIVE SUMMARY — 3 × 2 PROFESSIONAL METRIC CARDS
+    # ------------------------------------------------------------
+    def metric_card(label, value, detail, value_color=ink):
+        return [
+            Paragraph(
+                label.upper(),
+                ParagraphStyle(
+                    "MetricLabel",
+                    parent=small_style,
+                    fontName="Helvetica-Bold",
+                    fontSize=7.2,
+                    leading=9,
+                    textColor=muted,
+                    spaceAfter=3,
+                ),
+            ),
+            Paragraph(
+                value,
+                ParagraphStyle(
+                    "MetricValue",
+                    parent=small_style,
+                    fontName="Helvetica-Bold",
+                    fontSize=15,
+                    leading=18,
+                    textColor=value_color,
+                    spaceAfter=2,
+                ),
+            ),
+            Paragraph(detail, small_style),
+        ]
+
+    cards = [
+        metric_card(
+            "Total Purchases",
+            f"{int(total_purchases):,}",
+            "Purchase transactions",
+        ),
+        metric_card(
+            "Products Purchased",
+            f"{int(total_products_purchased):,}",
+            "Total units sold",
+        ),
+        metric_card(
+            "Total Purchase Amount",
+            f"Rs. {total_amount_recouped:,.2f}",
+            "Revenue recorded",
+        ),
+        metric_card(
+            "Saved From Waste",
+            f"{int(products_saved_from_waste):,}",
+            "Units bought within 3 days of expiry",
+            brand,
+        ),
+        metric_card(
+            "Amount Recouped",
+            f"Rs. {amount_recouped_from_waste:,.2f}",
+            "From near-expiry products",
+            brand,
+        ),
+        metric_card(
+            "Sustainability Rate",
+            f"{sustainability_rate:.2f}%",
+            "Saved units ÷ total purchased units",
+            brand,
+        ),
+    ]
+
+    card_table = Table(
+        [cards[:3], cards[3:]],
+        colWidths=[58 * mm, 58 * mm, 58 * mm],
+        rowHeights=[31 * mm, 31 * mm],
+        hAlign="LEFT",
+    )
+
+    card_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), surface),
+        ("BOX", (0, 0), (-1, -1), 0.7, border),
+        ("INNERGRID", (0, 0), (-1, -1), 0.7, border),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story += [
+        Paragraph("Performance Summary", section_style),
+        card_table,
         Spacer(1, 10),
     ]
 
-    summary = [
+    # ------------------------------------------------------------
+    # CHARTS
+    # ------------------------------------------------------------
+    def make_chart(points, y_max, title, suffix=""):
+        drawing = Drawing(500, 205)
 
-        [
-            "Metric",
-            "Value"
-        ],
-
-        [
-            "Total purchases",
-            str(total_purchases)
-        ],
-
-        [
-            "Total products purchased",
-            str(total_products_purchased)
-        ],
-
-        [
-            "Total purchase amount",
-            f"Rs. {total_amount_recouped:,.2f}"
-        ],
-
-        [
-            "Products saved from waste",
-            str(products_saved_from_waste)
-        ],
-
-        [
-            "Amount recouped from near-expiry products",
-            f"Rs. {amount_recouped_from_waste:,.2f}"
-        ],
-
-        [
-            "Sustainability rate",
-            f"{sustainability_rate:.2f}%"
-        ],
-    ]
-
-    summary_table = Table(
-        summary,
-        colWidths=[
-            95 * mm,
-            75 * mm
-        ]
-    )
-
-    summary_table.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.HexColor(
-                    "#eaf2ed"
-                )
-            ),
-
-            (
-                "FONTNAME",
-                (0, 0),
-                (-1, 0),
-                "Helvetica-Bold"
-            ),
-
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                0.5,
-                colors.HexColor(
-                    "#cfd8d2"
-                )
-            ),
-
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                7
-            ),
-        ])
-    )
-
-    story += [
-        summary_table,
-        Spacer(1, 14)
-    ]
-
-    def make_chart(
-        points,
-        y_max,
-        title
-    ):
-
-        drawing = Drawing(
-            500,
-            220
-        )
-
-        drawing.add(
-            String(
-                250,
-                205,
-                title,
-                textAnchor="middle",
-                fontSize=12
-            )
-        )
+        drawing.add(String(
+            250,
+            188,
+            title,
+            textAnchor="middle",
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            fillColor=ink,
+        ))
 
         plot = LinePlot()
-
         plot.x = 45
-        plot.y = 25
+        plot.y = 28
         plot.width = 430
-        plot.height = 160
-
+        plot.height = 145
         plot.data = [points]
-
         plot.xValueAxis.valueMin = 1
         plot.xValueAxis.valueMax = 14
-
+        plot.xValueAxis.valueStep = 1
         plot.yValueAxis.valueMin = 0
-        plot.yValueAxis.valueMax = max(
-            y_max,
-            1
-        )
+        plot.yValueAxis.valueMax = max(y_max, 1)
+        plot.yValueAxis.valueStep = max(y_max / 4, 1)
+
+        # Clean analytics-chart styling.
+        plot.xValueAxis.strokeColor = border
+        plot.yValueAxis.strokeColor = border
+        plot.xValueAxis.labels.fontName = "Helvetica"
+        plot.xValueAxis.labels.fontSize = 6.5
+        plot.xValueAxis.labels.fillColor = muted
+        plot.yValueAxis.labels.fontName = "Helvetica"
+        plot.yValueAxis.labels.fontSize = 6.5
+        plot.yValueAxis.labels.fillColor = muted
+        plot.xValueAxis.tickStrokeColor = border
+        plot.yValueAxis.tickStrokeColor = border
+        plot.xValueAxis.gridStrokeColor = colors.white
+        plot.yValueAxis.gridStrokeColor = colors.HexColor("#edf1ee")
 
         drawing.add(plot)
-
         return drawing
 
-    max_revenue = max(
-        [
-            p[1]
-            for p in revenue_points
-        ]
-        or [1]
-    )
+    max_revenue = max([p[1] for p in revenue_points] or [1])
 
-    story.append(
+    story += [
+        Paragraph("Revenue & Sustainability Trends", section_style),
         make_chart(
             revenue_points,
             max_revenue,
-            "Cumulative Revenue - Last 14 Days"
-        )
-    )
-
-    story.append(
-        Spacer(1, 10)
-    )
-
-    story.append(
+            "Cumulative Revenue — Last 14 Days",
+            "Rs.",
+        ),
+        Spacer(1, 4),
         make_chart(
             sustainability_points,
             100,
-            "Daily Sustainability Rate - Last 14 Days"
-        )
-    )
+            "Daily Sustainability Rate — Last 14 Days",
+            "%",
+        ),
+        Spacer(1, 7),
+    ]
 
-    story.append(
-        Spacer(1, 10)
-    )
+    # ------------------------------------------------------------
+    # DAILY BREAKDOWN TABLE
+    # ------------------------------------------------------------
+    story.append(Paragraph("14-Day Daily Breakdown", section_style))
 
     daily_table = Table(
         report_rows,
         repeatRows=1,
-        colWidths=[
-            30 * mm,
-            38 * mm,
-            25 * mm,
-            25 * mm,
-            42 * mm
+        colWidths=[27 * mm, 40 * mm, 24 * mm, 24 * mm, 43 * mm],
+        hAlign="LEFT",
+    )
+
+    daily_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), brand_dark),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.6),
+        ("TEXTCOLOR", (0, 1), (-1, -1), ink),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ("GRID", (0, 0), (-1, -1), 0.4, border),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [surface, surface_soft]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(daily_table)
+    story.append(Spacer(1, 8))
+
+    # ------------------------------------------------------------
+    # REPORT NOTE
+    # ------------------------------------------------------------
+    note_table = Table([
+        [
+            Paragraph(
+                "SUSTAINABILITY METRIC",
+                ParagraphStyle(
+                    "NoteLabel",
+                    parent=small_style,
+                    fontName="Helvetica-Bold",
+                    fontSize=7,
+                    textColor=brand,
+                    leading=9,
+                ),
+            ),
+            Paragraph(
+                "A product is counted as saved from waste when it is purchased "
+                "with 3 days or less remaining at the time of purchase.",
+                small_style,
+            ),
         ]
+    ], colWidths=[40 * mm, 118 * mm])
+
+    note_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), brand_soft),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#cfe0d4")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(note_table)
+
+    doc.build(
+        story,
+        onFirstPage=draw_page,
+        onLaterPages=draw_page,
     )
-
-    daily_table.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.HexColor(
-                    "#eaf2ed"
-                )
-            ),
-
-            (
-                "FONTNAME",
-                (0, 0),
-                (-1, 0),
-                "Helvetica-Bold"
-            ),
-
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                0.4,
-                colors.HexColor(
-                    "#cfd8d2"
-                )
-            ),
-
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                5
-            ),
-
-            (
-                "FONTSIZE",
-                (0, 0),
-                (-1, -1),
-                8
-            ),
-        ])
-    )
-
-    story += [
-
-        Paragraph(
-            "14-Day Daily Breakdown",
-            styles["Heading2"]
-        ),
-
-        daily_table,
-    ]
-
-    doc.build(story)
 
     buffer.seek(0)
 
@@ -2808,8 +2857,7 @@ def dashboard_report_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition":
-                "attachment; "
-                "filename=freshflow_dashboard_report.pdf"
+                "attachment; filename=dailycart_dashboard_report.pdf"
         },
     )
 

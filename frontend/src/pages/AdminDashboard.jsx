@@ -418,7 +418,7 @@ function AdminDashboard() {
             const link = document.createElement("a");
 
             link.href = url;
-            link.download = "freshflow_dashboard_report.pdf";
+            link.download = "dailycart_dashboard_report.pdf";
             document.body.appendChild(link);
             link.click();
             link.remove();
