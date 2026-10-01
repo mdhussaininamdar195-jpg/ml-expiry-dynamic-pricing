@@ -453,9 +453,32 @@ The system uses inventory, sales, demand, and expiry-related information to esti
 DailyCart integrates the machine learning pipeline with a web-based retail application containing customer, product management, inventory, purchasing, and administration functionality.
 
 
-### Screenshot filenames to use
+## Application Screenshots
 
-Create this folder in your repo:
+### Customer Product Details
 
-```text
-screenshots/
+![Customer Product Details](./screenshots/customer-product-details.png)
+
+### Admin Dashboard
+
+![Admin Dashboard](./screenshots/admin-dashboard.png)
+
+### Admin Product Catalogue
+
+![Admin Product Catalogue](./screenshots/admin-products.png)
+
+### Add Product
+
+![Add Product](./screenshots/admin-add-product.png)
+
+### Customer Account Settings
+
+![Customer Account Settings](./screenshots/customer-settings.png)
+
+### Customer Login
+
+![Customer Login](./screenshots/customer-login.png)
+
+### Admin Login
+
+![Admin Login](./screenshots/admin-login.png)
