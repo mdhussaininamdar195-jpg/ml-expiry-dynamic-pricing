@@ -11,8 +11,6 @@ The system combines inventory management, expiry-related risk prediction, dynami
 - Shafin Inamdar
 - Mohammed Hussain Inamdar
 
----
-
 ## Overview
 
 Perishable products can lose their value as they approach their expiry dates. If these products are not sold in time, they may contribute to inventory waste and financial loss.
@@ -22,22 +20,24 @@ DailyCart addresses this problem by using product inventory, sales, demand, and 
 The system follows a two-stage machine learning pipeline:
 
 ```text
-  Product and Inventory Data
-            |
-            v
-    Waste Risk Prediction
-            |
-            v
-      Waste Risk Score
-            |
-            v
- Dynamic Discount Prediction
-            |
-            v
-   Recommended Discount
-            |
-            v
-     Final Selling Price                                                                                                                                                                                                                             The machine learning models are integrated into a FastAPI backend and used by the web application to provide pricing-related predictions.
+Product and Inventory Data
+          |
+          v
+Waste Risk Prediction
+          |
+          v
+Waste Risk Score
+          |
+          v
+Dynamic Discount Prediction
+          |
+          v
+Recommended Discount
+          |
+          v
+Final Selling Price
+
+The machine learning models are integrated into a FastAPI backend and used by the web application to provide pricing-related predictions.
 
 Key Features
 Machine Learning
@@ -178,8 +178,9 @@ Stock Demand Ratio
 Product Name
 Category
 
-The preprocessing components are fitted during model preparation and saved as reusable artifacts.    
+The preprocessing components are fitted during model preparation and saved as reusable artifacts.
 
+System Architecture
                          DailyCart
                              |
               +--------------+--------------+
@@ -202,7 +203,7 @@ The preprocessing components are fitted during model preparation and saved as re
               +-------------------+---------------------+
                                   |
                          Customer / Admin UI
-Technology Stack:
+Technology Stack
 Frontend
 React
 Vite
@@ -224,7 +225,7 @@ Seaborn
 Version Control
 Git
 GitHub
-
+Project Structure
 ml-expiry-dynamic-pricing/
 │
 ├── backend/
@@ -274,11 +275,20 @@ ml-expiry-dynamic-pricing/
 │       ├── train_waste_model.py
 │       └── visualize_results.py
 │
+├── screenshots/
+│   ├── admin-add-product.png
+│   ├── admin-dashboard.png
+│   ├── admin-login.png
+│   ├── admin-products.png
+│   ├── customer-login.png
+│   ├── customer-product-details.png
+│   └── customer-settings.png
+│
 ├── .gitignore
 └── README.md
 Machine Learning Results and Visualizations
 
-The repository contains the visualizations generated during dataset analysis and model evaluation.
+The repository contains visualizations generated during dataset analysis and model evaluation.
 
 Dataset Analysis
 Correlation Heatmap
@@ -298,33 +308,49 @@ Error Distribution
 Regression Metrics
 Application Screenshots
 Customer Product Details
+## Application Screenshots
+
+### Customer Product Details
 
 The customer interface displays the product category, shelf-life information, current price, original price, discount, savings, and the option to add the product to the cart.
 
-Admin Dashboard
+![Customer Product Details](./screenshots/customer-product-details.png)
+
+### Admin Dashboard
 
 The administration dashboard provides information about purchases, products purchased, products purchased near expiry, amount recouped, purchase revenue, store revenue growth, and sustainability-related statistics.
 
-Admin Product Catalogue
+![Admin Dashboard](./screenshots/admin-dashboard.png)
+
+### Admin Product Catalogue
 
 The product management interface allows administrators to search and filter products and manage product information including category, price, stock, expiry, risk level, editing, and deletion.
 
-Add Product
+![Admin Product Catalogue](./screenshots/admin-products.png)
+
+### Add Product
 
 The administration interface allows a new product to be added with product name, category, product family, selling price, stock date, expiry date, current stock, and product images.
 
-Customer Account Settings
+![Add Product](./screenshots/admin-add-product.png)
+
+### Customer Account Settings
 
 The customer settings interface provides account information, appearance preferences, account-related options, FAQ access, logout, and purchase summary.
 
-Customer Login
+![Customer Account Settings](./screenshots/customer-settings.png)
+
+### Customer Login
 
 Customers can sign in using their registered email and password.
 
-Admin Login
+![Customer Login](./screenshots/customer-login.png)
+
+### Admin Login
 
 Administrators have a separate authentication interface for accessing product management, pricing, inventory, and store analytics.
 
+![Admin Login](./screenshots/admin-login.png)
 Running the Project
 Clone the Repository
 git clone <repository-url>
@@ -341,7 +367,7 @@ Activate the virtual environment on Windows:
 
 Install the required Python packages used by the backend and machine learning components.
 
-Start the FastAPI backend with:
+Start the FastAPI backend:
 
 uvicorn backend.main:app --reload
 
@@ -395,11 +421,11 @@ waste_risk_label_encoder.pkl
 waste_risk_xgb.pkl
 
 These artifacts allow the backend to load the trained models and preprocessing components for prediction.
-rediction Workflow
+
+Prediction Workflow
 
 When product information is processed by the prediction system, the application follows the following workflow:
 
-```text
 Product Information
         |
         v
@@ -451,34 +477,3 @@ The objective of DailyCart is to demonstrate an end-to-end machine learning and 
 The system uses inventory, sales, demand, and expiry-related information to estimate product waste risk and generate discount recommendations for products approaching expiry.
 
 DailyCart integrates the machine learning pipeline with a web-based retail application containing customer, product management, inventory, purchasing, and administration functionality.
-
-
-## Application Screenshots
-
-### Customer Product Details
-
-![Customer Product Details](./screenshots/customer-product-details.png)
-
-### Admin Dashboard
-
-![Admin Dashboard](./screenshots/admin-dashboard.png)
-
-### Admin Product Catalogue
-
-![Admin Product Catalogue](./screenshots/admin-products.png)
-
-### Add Product
-
-![Add Product](./screenshots/admin-add-product.png)
-
-### Customer Account Settings
-
-![Customer Account Settings](./screenshots/customer-settings.png)
-
-### Customer Login
-
-![Customer Login](./screenshots/customer-login.png)
-
-### Admin Login
-
-![Admin Login](./screenshots/admin-login.png)
