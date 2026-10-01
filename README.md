@@ -354,30 +354,39 @@ Customers can sign in using their registered email and password.
 Administrators have a separate authentication interface for accessing product management, pricing, inventory, and store analytics.
 
 ![Admin Login](./screenshots/admin-login.png)
-Running the Project
+
+
+Running the Project:
+
 Clone the Repository
-git clone <repository-url>
+```text
+git clone <https://github.com/mdhussaininamdar195-jpg/ml-expiry-dynamic-pricing.git>
 cd ml-expiry-dynamic-pricing
+```
 Backend Setup
 
 Create a Python virtual environment:
 ```text
 
 python -m venv .venv
+```
 
 Activate the virtual environment on Windows:
+```text
 
 .venv\Scripts\activate
+```
 
 Install the required Python packages used by the backend and machine learning components.
 
 Start the FastAPI backend:
-
+```text
 uvicorn backend.main:app --reload
 
 The FastAPI API documentation is available at:
 
 http://127.0.0.1:8000/docs
+```
 
 The backend loads the trained machine learning artifacts from:
 
@@ -385,14 +394,18 @@ ml/models/
 Frontend Setup
 
 Navigate to the frontend directory:
+```text
 
 cd frontend
+```
 
 Install the frontend dependencies:
-
+```text
 npm install
+```
 
 Start the development server:
+```text
 
 npm run dev
 ```
