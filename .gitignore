@@ -1,10 +1,63 @@
+# ==============================
+# Python / Backend
+# ==============================
+
 .venv/
 __pycache__/
+*.py[cod]
+*.pyo
+
+.pytest_cache/
+.mypy_cache/
+
+# ==============================
+# Environment / Secrets
+# ==============================
+
+.env
+.env.*
+!.env.example
+
+# ==============================
+# Database
+# ==============================
+
+products.db
+*.sqlite
+*.sqlite3
+
+# ==============================
+# ML Generated / Processed Data
+# ==============================
 
 ml/datasets/processed/
 
 *.joblib
 *.npy
 
-.env
-products.db
+# ==============================
+# Node / React / Vite
+# ==============================
+
+node_modules/
+frontend/node_modules/
+
+dist/
+frontend/dist/
+
+# ==============================
+# Logs
+# ==============================
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================
+# OS / Editor Files
+# ==============================
+
+.DS_Store
+Thumbs.db
+.vscode/
