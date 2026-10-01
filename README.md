@@ -36,7 +36,7 @@ Recommended Discount
           |
           v
 Final Selling Price
-
+```
 The machine learning models are integrated into a FastAPI backend and used by the web application to provide pricing-related predictions.
 
 Key Features
