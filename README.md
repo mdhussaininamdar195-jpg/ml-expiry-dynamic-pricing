@@ -179,7 +179,7 @@ Product Name
 Category
 
 The preprocessing components are fitted during model preparation and saved as reusable artifacts.
-
+```text
 System Architecture
                          DailyCart
                              |
@@ -203,6 +203,7 @@ System Architecture
               +-------------------+---------------------+
                                   |
                          Customer / Admin UI
+```
 Technology Stack
 Frontend
 React
@@ -226,6 +227,7 @@ Version Control
 Git
 GitHub
 Project Structure
+```text
 ml-expiry-dynamic-pricing/
 │
 ├── backend/
@@ -286,6 +288,7 @@ ml-expiry-dynamic-pricing/
 │
 ├── .gitignore
 └── README.md
+```
 Machine Learning Results and Visualizations
 
 The repository contains visualizations generated during dataset analysis and model evaluation.
@@ -358,6 +361,7 @@ cd ml-expiry-dynamic-pricing
 Backend Setup
 
 Create a Python virtual environment:
+```text
 
 python -m venv .venv
 
@@ -391,7 +395,7 @@ npm install
 Start the development server:
 
 npm run dev
-
+```
 The frontend can then be accessed through the local development URL provided by Vite.
 
 Database
@@ -426,6 +430,7 @@ Prediction Workflow
 
 When product information is processed by the prediction system, the application follows the following workflow:
 
+```text
 Product Information
         |
         v
@@ -448,7 +453,7 @@ Recommended Discount
         |
         v
 Dynamic Price
-
+```
 The resulting pricing information is made available through the application's product interface.
 
 Repository Contents
