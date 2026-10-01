@@ -228,7 +228,32 @@ function CustomerHome() {
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
-  const [cartItems, setCartItems] = useState([]);
+  const [cartItems, setCartItems] = useState(() => {
+    try {
+      // New cart storage keeps the complete product snapshot so products
+      // from other pagination pages are not lost after a refresh.
+      const savedItems =
+        localStorage.getItem("dailycart_cart_items") ||
+        localStorage.getItem("dailycart_cart");
+
+      if (!savedItems) return [];
+
+      const parsedCart = JSON.parse(savedItems);
+      if (!Array.isArray(parsedCart)) return [];
+
+      return parsedCart
+        .map((item) => ({
+          ...item,
+          quantity: Math.max(1, Number(item?.quantity) || 1),
+        }))
+        .filter(
+          (item) => item?.id !== undefined && item?.id !== null
+        );
+    } catch (error) {
+      console.error("Failed to restore cart:", error);
+      return [];
+    }
+  });
   const [products, setProducts] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [purchaseComplete, setPurchaseComplete] = useState(false);
@@ -249,6 +274,31 @@ function CustomerHome() {
   const categoryListRef = useRef(null);
 
   const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    try {
+      // Save the complete cart snapshot. This means products from page 2,
+      // page 3, etc. remain in the cart even though only one catalogue page
+      // is loaded at a time.
+      localStorage.setItem("dailycart_cart_items", JSON.stringify(cartItems));
+
+      // Also keep a small canonical representation of id + quantity.
+      localStorage.setItem(
+        "dailycart_cart_quantities",
+        JSON.stringify(
+          cartItems.map((item) => ({
+            id: item.id,
+            quantity: Number(item.quantity ?? 1),
+          }))
+        )
+      );
+
+      // Keep the original key for compatibility with the previous version.
+      localStorage.setItem("dailycart_cart", JSON.stringify(cartItems));
+    } catch (error) {
+      console.error("Failed to save cart:", error);
+    }
+  }, [cartItems]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("dailycart_theme");
