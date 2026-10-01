@@ -224,36 +224,84 @@ function CategoryArrow({ direction = "right" }) {
   );
 }
 
+
+const LEGACY_CART_KEY = "dailycart_cart";
+const CART_KEY_PREFIX = "dailycart_cart_user_";
+
+function getCurrentCartStorageKey() {
+  try {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      return `${CART_KEY_PREFIX}guest`;
+    }
+
+    // The JWT subject is the authenticated user's stable ID.
+    // Using the user ID instead of the email/token keeps the cart
+    // stable for that account across page refreshes and logins.
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = JSON.parse(
+        decodeURIComponent(
+          atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+            .split("")
+            .map((char) =>
+              `%${`00${char.charCodeAt(0).toString(16)}`.slice(-2)}`
+            )
+            .join("")
+        )
+      );
+
+      if (payload?.sub !== undefined && payload?.sub !== null) {
+        return `${CART_KEY_PREFIX}${String(payload.sub)}`;
+      }
+    }
+
+    // Fallback if the token cannot be decoded.
+    return `${CART_KEY_PREFIX}${token}`;
+  } catch (error) {
+    console.error("Failed to determine cart account:", error);
+    return `${CART_KEY_PREFIX}guest`;
+  }
+}
+
+function readStoredCart() {
+  try {
+    const accountCartKey = getCurrentCartStorageKey();
+    const savedAccountCart = localStorage.getItem(accountCartKey);
+
+    if (savedAccountCart) {
+      const parsed = JSON.parse(savedAccountCart);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+
+    // Migrate the cart created by the older global-cart version.
+    // This happens only once for the account currently logged in.
+    const legacyCart = localStorage.getItem(LEGACY_CART_KEY);
+    if (legacyCart) {
+      const parsedLegacyCart = JSON.parse(legacyCart);
+
+      if (Array.isArray(parsedLegacyCart) && parsedLegacyCart.length > 0) {
+        localStorage.setItem(accountCartKey, JSON.stringify(parsedLegacyCart));
+        localStorage.removeItem(LEGACY_CART_KEY);
+        return parsedLegacyCart;
+      }
+
+      localStorage.removeItem(LEGACY_CART_KEY);
+    }
+
+    return [];
+  } catch (error) {
+    console.error("Failed to restore account cart:", error);
+    return [];
+  }
+}
+
 function CustomerHome() {
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
-  const [cartItems, setCartItems] = useState(() => {
-    try {
-      // New cart storage keeps the complete product snapshot so products
-      // from other pagination pages are not lost after a refresh.
-      const savedItems =
-        localStorage.getItem("dailycart_cart_items") ||
-        localStorage.getItem("dailycart_cart");
-
-      if (!savedItems) return [];
-
-      const parsedCart = JSON.parse(savedItems);
-      if (!Array.isArray(parsedCart)) return [];
-
-      return parsedCart
-        .map((item) => ({
-          ...item,
-          quantity: Math.max(1, Number(item?.quantity) || 1),
-        }))
-        .filter(
-          (item) => item?.id !== undefined && item?.id !== null
-        );
-    } catch (error) {
-      console.error("Failed to restore cart:", error);
-      return [];
-    }
-  });
+  const [cartItems, setCartItems] = useState(() => readStoredCart());
   const [products, setProducts] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [purchaseComplete, setPurchaseComplete] = useState(false);
@@ -277,26 +325,14 @@ function CustomerHome() {
 
   useEffect(() => {
     try {
-      // Save the complete cart snapshot. This means products from page 2,
-      // page 3, etc. remain in the cart even though only one catalogue page
-      // is loaded at a time.
-      localStorage.setItem("dailycart_cart_items", JSON.stringify(cartItems));
+      const cartStorageKey = getCurrentCartStorageKey();
+      localStorage.setItem(cartStorageKey, JSON.stringify(cartItems));
 
-      // Also keep a small canonical representation of id + quantity.
-      localStorage.setItem(
-        "dailycart_cart_quantities",
-        JSON.stringify(
-          cartItems.map((item) => ({
-            id: item.id,
-            quantity: Number(item.quantity ?? 1),
-          }))
-        )
-      );
-
-      // Keep the original key for compatibility with the previous version.
-      localStorage.setItem("dailycart_cart", JSON.stringify(cartItems));
+      // Remove the old global key so a different account can never
+      // accidentally inherit this account's cart.
+      localStorage.removeItem(LEGACY_CART_KEY);
     } catch (error) {
-      console.error("Failed to save cart:", error);
+      console.error("Failed to save account cart:", error);
     }
   }, [cartItems]);
 
